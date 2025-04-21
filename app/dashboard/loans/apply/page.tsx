@@ -206,232 +206,232 @@ export default function LoanApplicationPage() {
 
   return (
     <>
-      <DashboardShell>
-        <div className="flex flex-col gap-8">
-          <div className="flex items-center gap-4">
-            <Button variant="outline" size="icon" onClick={() => router.back()}>
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">Apply for a Loan</h1>
-              <p className="text-muted-foreground">Fill out the form below to apply for a loan</p>
-            </div>
-          </div>
-
-          <div className="grid gap-8 md:grid-cols-3">
-            <div className="md:col-span-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Loan Application Form</CardTitle>
-                  <CardDescription>Please provide accurate information to expedite your application</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                      <FormField
-                        control={form.control}
-                        name="loanType"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Loan Type</FormLabel>
-                            <Select
-                              onValueChange={(value) => {
-                                field.onChange(value)
-                                const selected = loanTypes.find((type) => type.id === value)
-                                if (selected) {
-                                  setSelectedLoanType(selected)
-                                }
-                              }}
-                              defaultValue={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select a loan type" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {loanTypes.map((type) => (
-                                  <SelectItem key={type.id} value={type.id}>
-                                    {type.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormDescription>{selectedLoanType?.description}</FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className="grid gap-6 md:grid-cols-2">
-                        <FormField
-                          control={form.control}
-                          name="amount"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Loan Amount (ZAR)</FormLabel>
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  placeholder="Enter amount"
-                                  {...field}
-                                  min={selectedLoanType.minAmount}
-                                  max={selectedLoanType.maxAmount}
-                                />
-                              </FormControl>
-                              <FormDescription>
-                                Min: R{selectedLoanType.minAmount.toLocaleString()}, Max: R
-                                {selectedLoanType.maxAmount.toLocaleString()}
-                              </FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="term"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Loan Term (Months)</FormLabel>
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  placeholder="Enter term"
-                                  {...field}
-                                  min={selectedLoanType.minTerm}
-                                  max={selectedLoanType.maxTerm}
-                                />
-                              </FormControl>
-                              <FormDescription>
-                                Min: {selectedLoanType.minTerm} months, Max: {selectedLoanType.maxTerm} months
-                              </FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <FormField
-                        control={form.control}
-                        name="purpose"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Loan Purpose</FormLabel>
-                            <FormControl>
-                              <Textarea
-                                placeholder="Describe why you need this loan"
-                                className="min-h-[120px]"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormDescription>Provide details about how you plan to use the loan</FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className="grid gap-6 md:grid-cols-2">
-                        <FormField
-                          control={form.control}
-                          name="bankStatement"
-                          render={({ field: { value, onChange, ...fieldProps } }) => (
-                            <FormItem>
-                              <FormLabel>Bank Statement (Last 3 Months)</FormLabel>
-                              <FormControl>
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="file"
-                                    accept=".pdf,.jpg,.jpeg,.png"
-                                    onChange={(e) => onChange(e.target.files)}
-                                    {...fieldProps}
-                                    className="cursor-pointer"
-                                  />
-                                </div>
-                              </FormControl>
-                              <FormDescription>Upload your bank statement (PDF or image)</FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="idDocument"
-                          render={({ field: { value, onChange, ...fieldProps } }) => (
-                            <FormItem>
-                              <FormLabel>ID Document</FormLabel>
-                              <FormControl>
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="file"
-                                    accept=".pdf,.jpg,.jpeg,.png"
-                                    onChange={(e) => onChange(e.target.files)}
-                                    {...fieldProps}
-                                    className="cursor-pointer"
-                                  />
-                                </div>
-                              </FormControl>
-                              <FormDescription>Upload your ID document (PDF or image)</FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <Button type="submit" className="w-full" disabled={isSubmitting}>
-                        {isSubmitting ? "Submitting Application..." : "Submit Application"}
-                      </Button>
-                    </form>
-                  </Form>
-                </CardContent>
-              </Card>
-            </div>
-            <div>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Loan Summary</CardTitle>
-                  <CardDescription>Review your loan details before submitting</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <h3 className="font-medium">Loan Type</h3>
-                    <p className="text-muted-foreground">{watchLoanType ? selectedLoanType.name : "Not selected"}</p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Interest Rate</h3>
-                    <p className="text-muted-foreground">{selectedLoanType.interestRate}% per annum</p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Loan Amount</h3>
-                    <p className="text-muted-foreground">
-                      {watchAmount ? `R${watchAmount.toLocaleString()}` : "Not specified"}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Loan Term</h3>
-                    <p className="text-muted-foreground">{watchTerm ? `${watchTerm} months` : "Not specified"}</p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Monthly Payment</h3>
-                    <p className="text-xl font-semibold text-primary">
-                      {monthlyPayment ? `R${monthlyPayment.toFixed(2)}` : "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Total Repayment</h3>
-                    <p className="text-muted-foreground">
-                      {monthlyPayment && watchTerm ? `R${(monthlyPayment * watchTerm).toFixed(2)}` : "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Total Interest</h3>
-                    <p className="text-muted-foreground">
-                      {monthlyPayment && watchTerm && watchAmount
-                        ? `R${(monthlyPayment * watchTerm - watchAmount).toFixed(2)}`
-                        : "N/A"}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+    <DashboardShell>
+      <div className="flex flex-col gap-8">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Apply for a Loan</h1>
+            <p className="text-muted-foreground">Fill out the form below to apply for a loan</p>
           </div>
         </div>
-      </DashboardShell>
+
+        <div className="grid gap-8 md:grid-cols-3">
+          <div className="md:col-span-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Loan Application Form</CardTitle>
+                <CardDescription>Please provide accurate information to expedite your application</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                    <FormField
+                      control={form.control}
+                      name="loanType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Loan Type</FormLabel>
+                          <Select
+                            onValueChange={(value) => {
+                              field.onChange(value)
+                              const selected = loanTypes.find((type) => type.id === value)
+                              if (selected) {
+                                setSelectedLoanType(selected)
+                              }
+                            }}
+                            defaultValue={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select a loan type" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {loanTypes.map((type) => (
+                                <SelectItem key={type.id} value={type.id}>
+                                  {type.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>{selectedLoanType?.description}</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="amount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Loan Amount (ZAR)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                placeholder="Enter amount"
+                                {...field}
+                                min={selectedLoanType.minAmount}
+                                max={selectedLoanType.maxAmount}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Min: R{selectedLoanType.minAmount.toLocaleString()}, Max: R
+                              {selectedLoanType.maxAmount.toLocaleString()}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="term"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Loan Term (Months)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                placeholder="Enter term"
+                                {...field}
+                                min={selectedLoanType.minTerm}
+                                max={selectedLoanType.maxTerm}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Min: {selectedLoanType.minTerm} months, Max: {selectedLoanType.maxTerm} months
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <FormField
+                      control={form.control}
+                      name="purpose"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Loan Purpose</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Describe why you need this loan"
+                              className="min-h-[120px]"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription>Provide details about how you plan to use the loan</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="bankStatement"
+                        render={({ field: { value, onChange, ...fieldProps } }) => (
+                          <FormItem>
+                            <FormLabel>Bank Statement (Last 3 Months)</FormLabel>
+                            <FormControl>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="file"
+                                  accept=".pdf,.jpg,.jpeg,.png"
+                                  onChange={(e) => onChange(e.target.files)}
+                                  {...fieldProps}
+                                  className="cursor-pointer"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormDescription>Upload your bank statement (PDF or image)</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="idDocument"
+                        render={({ field: { value, onChange, ...fieldProps } }) => (
+                          <FormItem>
+                            <FormLabel>ID Document</FormLabel>
+                            <FormControl>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="file"
+                                  accept=".pdf,.jpg,.jpeg,.png"
+                                  onChange={(e) => onChange(e.target.files)}
+                                  {...fieldProps}
+                                  className="cursor-pointer"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormDescription>Upload your ID document (PDF or image)</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    <Button type="submit" className="w-full" disabled={isSubmitting}>
+                      {isSubmitting ? "Submitting Application..." : "Submit Application"}
+                    </Button>
+                  </form>
+                </Form>
+              </CardContent>
+            </Card>
+          </div>
+          <div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Loan Summary</CardTitle>
+                <CardDescription>Review your loan details before submitting</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <h3 className="font-medium">Loan Type</h3>
+                  <p className="text-muted-foreground">{watchLoanType ? selectedLoanType.name : "Not selected"}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium">Interest Rate</h3>
+                  <p className="text-muted-foreground">{selectedLoanType.interestRate}% per annum</p>
+                </div>
+                <div>
+                  <h3 className="font-medium">Loan Amount</h3>
+                  <p className="text-muted-foreground">
+                    {watchAmount ? `R${watchAmount.toLocaleString()}` : "Not specified"}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="font-medium">Loan Term</h3>
+                  <p className="text-muted-foreground">{watchTerm ? `${watchTerm} months` : "Not specified"}</p>
+                </div>
+                <div>
+                  <h3 className="font-medium">Monthly Payment</h3>
+                  <p className="text-xl font-semibold text-primary">
+                    {monthlyPayment ? `R${monthlyPayment.toFixed(2)}` : "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="font-medium">Total Repayment</h3>
+                  <p className="text-muted-foreground">
+                    {monthlyPayment && watchTerm ? `R${(monthlyPayment * watchTerm).toFixed(2)}` : "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="font-medium">Total Interest</h3>
+                  <p className="text-muted-foreground">
+                    {monthlyPayment && watchTerm && watchAmount
+                      ? `R${(monthlyPayment * watchTerm - watchAmount).toFixed(2)}`
+                      : "N/A"}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </DashboardShell>
 
       <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
         <DialogContent className="sm:max-w-md">

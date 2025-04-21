@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { DollarSign, Users, BarChart2, TrendingUp, Plus, FileText, Clock, ArrowRight, Bell, UserCircle, Settings, LogOut, User, Upload, Building2, CreditCard, Calendar, Phone, Mail, Home, X, Eye, Maximize2, CheckCircle } from "lucide-react"
+import { DollarSign, Users, BarChart2, TrendingUp, Plus, FileText, Clock, ArrowRight, Bell, UserCircle, Settings, LogOut, User, Upload, Building2, CreditCard, Calendar, Phone, Mail, Home, X, Eye, Maximize2, CheckCircle, Key } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
 import {
   Dialog,
@@ -27,26 +28,58 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import styles from './styles.module.css'
 import { toast } from "@/components/ui/use-toast"
 import { useAuth } from "@/contexts/auth-context"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Loader2 } from "lucide-react"
+import { authState } from '@/lib/auth-state'
+import emailjs from '@emailjs/browser'
 
 interface UserProfile {
   id: string
-  full_name: string
+  auth_id: string | null
   email: string
+  full_name: string
   phone: string | null
-  address: string | null
+  profile_picture_url: string | null
+  user_role: string
   date_of_birth: string | null
+  address: string | null
+  city: string | null
+  state: string | null
+  postal_code: string | null
+  country: string | null
   employment_status: string | null
   monthly_income: number | null
   credit_score: number | null
-  profile_image_url: string | null
+  is_verified: boolean
+  last_login: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface FormData {
+  fullName: string
+  email: string
+  phone: string
+  address: string
+  employmentStatus: string
+  monthlyIncome: string
+  loanAmount: string
+  loanPurpose: string
+  returnDate: string
+  bankName: string
+  accountNumber: string
+  accountType: string
+  employmentContract: File | null
+  investmentType: string
+  investmentAmount: string
+  investmentTerm: string
+  paypalEmail: string
 }
 
 export default function UserDashboard() {
-  const { user, userRole, isLoading: authLoading, signOut } = useAuth()
+  const { user, userRole, isLoading: authLoading} = useAuth()
   const router = useRouter()
   const supabase = createClient()
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -83,26 +116,24 @@ export default function UserDashboard() {
   const [filterDate, setFilterDate] = useState<string>('all')
   const [selectedMember, setSelectedMember] = useState<any>(null)
   const [isMemberDetailsOpen, setIsMemberDetailsOpen] = useState(false)
-  const [formData, setFormData] = useState({
-    fullName: "",
-    email: "",
-    phone: "",
-    address: "",
-    employmentStatus: "",
-    monthlyIncome: "",
-    loanAmount: "",
-    loanPurpose: "",
-    returnDate: "",
-    bankName: "",
-    accountNumber: "",
-    accountType: "",
-    bankStatement: null as File | null,
-    proofOfId: null as File | null,
-    employmentContract: null as File | null,
-    investmentType: "",
-    investmentAmount: "",
-    investmentTerm: "",
-    paypalEmail: ""
+  const [formData, setFormData] = useState<FormData>({
+    fullName: '',
+    email: '',
+    phone: '',
+    address: '',
+    employmentStatus: '',
+    monthlyIncome: '',
+    loanAmount: '',
+    loanPurpose: '',
+    returnDate: '',
+    bankName: '',
+    accountNumber: '',
+    accountType: '',
+    employmentContract: null,
+    investmentType: '',
+    investmentAmount: '',
+    investmentTerm: '',
+    paypalEmail: ''
   })
 
   const [investmentFormData, setInvestmentFormData] = useState({
@@ -127,6 +158,17 @@ export default function UserDashboard() {
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false)
   const [paymentStep, setPaymentStep] = useState(1)
   const [accountHolderName, setAccountHolderName] = useState("")
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false)
+  const [userEmail, setUserEmail] = useState<string>("")
+
+  // Add the getInitials function near the top of the component
+  const getUserInitial = (name: string | null | undefined) => {
+    if (!name) return 'U';
+    return name.charAt(0).toUpperCase();
+  };
 
   // Define handleViewStokvelaDetails at the top of the component
   const handleViewStokvelaDetails = async (stokvela: any) => {
@@ -195,56 +237,57 @@ export default function UserDashboard() {
   };
 
   useEffect(() => {
-    const checkSessionAndFetchProfile = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession()
-
-      if (error || !session) {
-        router.push('/')
+    const fetchUserProfile = async () => {
+      try {
+        const authUser = authState.getUser()
+        if (!authUser?.email) {
+          console.error('No user email found')
         return
       }
 
-      // Fetch user profile data
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
+        const { data, error } = await supabase
+          .from('users_account')
         .select('*')
-        .eq('id', session.user.id)
+          .eq('email', authUser.email)
         .single()
 
-      if (profileError) {
-        console.error('Error fetching profile:', profileError)
+        if (error) {
+          console.error('Error fetching user profile:', error)
         return
       }
 
-      setUserProfile(profileData)
-
-      // Verify user role
-      const { data: userData, error: roleError } = await supabase
-        .from('users_account')
-        .select('user_role')
-        .eq('auth_id', session.user.id)
-        .single()
-
-      if (roleError || !userData || userData.user_role !== 'user') {
-        router.push('/')
-        return
+        if (data) {
+          setUserProfile({
+            id: data.id,
+            email: data.email,
+            full_name: data.full_name || '',
+            phone: data.phone || '',
+            address: data.address || '',
+            employment_status: data.employment_status || '',
+            monthly_income: data.monthly_income || 0,
+            user_role: data.user_role || 'user'
+          })
+        }
+      } catch (error) {
+        console.error('Error in fetchUserProfile:', error)
       }
     }
 
-    checkSessionAndFetchProfile()
-  }, [router])
+    fetchUserProfile()
+  }, [])
 
   useEffect(() => {
     const fetchUserLoans = async () => {
       if (activeTab === 'loans') {
         setIsLoadingLoans(true)
         try {
-          const { data: { session } } = await supabase.auth.getSession()
-          if (!session?.user) return
+          const userId = authState.getUserId()
+          if (!userId) return
 
           const { data: loans, error } = await supabase
             .from('loan_applications')
             .select('*')
-            .eq('user_id', session.user.id)
+            .eq('user_id', userId)
             .order('created_at', { ascending: false })
 
           if (error) throw error
@@ -267,13 +310,13 @@ export default function UserDashboard() {
 
   const fetchUserInvestments = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) return
+      const userId = authState.getUserId()
+      if (!userId) return
 
       const { data, error } = await supabase
         .from('investments')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -343,10 +386,6 @@ export default function UserDashboard() {
     fetchStokvelas()
   }, [activeTab])
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/')
-  }
 
   const validateStep = (step: number) => {
     switch (step) {
@@ -492,12 +531,8 @@ export default function UserDashboard() {
         .getPublicUrl(filePath)
 
       return filePath
-    } catch (error: any) {
-      console.error('File upload error:', error)
-      // Add error details to console for debugging
-      if (error.error) {
-        console.error('Error details:', error.error)
-      }
+    } catch (error) {
+      console.error(`Error in uploadFile:`, error)
       throw error
     }
   }
@@ -507,36 +542,37 @@ export default function UserDashboard() {
       setIsSubmitting(true)
       
       // Validate final step
-      if (!validateStep(3)) {
+      if (!validateStep(4)) {
         setIsSubmitting(false)
         return
       }
 
-      // Get current user
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.user) {
         toast({
           title: "Error",
-          description: "Please sign in to submit a loan application",
+          description: "You must be logged in to submit a loan application",
           variant: "destructive",
         })
         return
       }
 
-      // Upload documents to storage
-      const documentUrls: Record<string, string> = {}
+      const userId = session.user.id
+      const documentUrls: { [key: string]: string } = {}
 
       // Upload bank statement
       if (formData.bankStatement) {
         try {
-          const path = await uploadFile(formData.bankStatement, 'bank-statements', session.user.id)
+          const path = await uploadFile(formData.bankStatement, 'bank-statements', userId)
           documentUrls.bank_statement_url = path
         } catch (error) {
+          console.error('Error uploading bank statement:', error)
           toast({
             title: "Error",
             description: "Failed to upload bank statement. Please try again.",
             variant: "destructive",
           })
+          setIsSubmitting(false)
           return
         }
       }
@@ -544,89 +580,166 @@ export default function UserDashboard() {
       // Upload ID document
       if (formData.proofOfId) {
         try {
-          const path = await uploadFile(formData.proofOfId, 'id-documents', session.user.id)
+          const path = await uploadFile(formData.proofOfId, 'id-documents', userId)
           documentUrls.id_document_url = path
         } catch (error) {
+          console.error('Error uploading ID document:', error)
           toast({
             title: "Error",
             description: "Failed to upload ID document. Please try again.",
             variant: "destructive",
           })
+          setIsSubmitting(false)
           return
         }
       }
 
-      // Upload contract (optional)
-      if (formData.employmentContract) {
+      // Create loan application
+      try {
+        // Calculate returning amount (40% interest)
+        const returningAmount = parseFloat(formData.loanAmount) * 1.4
+        
+        // Calculate term in months (assuming returnDate is in format YYYY-MM-DD)
+        const returnDate = new Date(formData.returnDate)
+        const today = new Date()
+        const monthsDiff = (returnDate.getFullYear() - today.getFullYear()) * 12 + 
+                          (returnDate.getMonth() - today.getMonth())
+        const termInMonths = Math.max(1, monthsDiff) // Ensure at least 1 month
+
+        const { error } = await supabase
+          .from('loan_applications')
+          .insert({
+            user_id: userId,
+            amount: parseFloat(formData.loanAmount),
+            purpose: formData.loanPurpose,
+            term: termInMonths, // Use calculated months instead of date string
+            returning_date: formData.returnDate,
+            bank_statement_url: documentUrls.bank_statement_url,
+            id_document_url: documentUrls.id_document_url,
+            status: 'pending',
+            employment_status: formData.employmentStatus,
+            monthly_income: parseFloat(formData.monthlyIncome),
+            returning_amount: returningAmount,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+
+        if (error) {
+          console.error('Database error:', error)
+          throw new Error(`Database error: ${error.message}`)
+        }
+
+        // Send confirmation email using EmailJS
         try {
-          const path = await uploadFile(formData.employmentContract, 'contracts', session.user.id)
-          documentUrls.contract_url = path
-        } catch (error) {
+          // Initialize EmailJS with your public key
+          emailjs.init("xC1QMlEUFiMQaCmHA")
+          
+          // Format the return date for display
+          const formattedReturnDate = new Date(formData.returnDate).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          })
+          
+          // Get the user's email directly from the session
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session?.user) {
+            throw new Error("User session not found")
+          }
+          
+          const userEmail = session.user.email
+          const userName = session.user.user_metadata?.full_name || "Valued Customer"
+          
+          // Send the email
+          await emailjs.send(
+            "service_auuykij", // Service ID
+            "template_3ns00mj", // Template ID
+            {
+              to_name: userName,
+              to_email: userEmail,
+              message: `Thank you for applying for a loan with GreenFina. Your application has been received and is currently under review. We will notify you once a decision has been made.`,
+              loan_amount: parseFloat(formData.loanAmount).toLocaleString(),
+              total_amount: returningAmount.toLocaleString(),
+              due_date: formattedReturnDate,
+            },
+            "xC1QMlEUFiMQaCmHA" // Public Key
+          )
+          
+          console.log("Confirmation email sent successfully to:", userEmail)
+          
+          // Show success dialog
+          setUserEmail(userEmail)
+          setShowSuccessDialog(true)
+          
+          // Wait for 3 seconds before closing the modal and resetting the form
+          setTimeout(() => {
+            setFormData({
+              fullName: '',
+              email: '',
+              phone: '',
+              address: '',
+              employmentStatus: '',
+              monthlyIncome: '',
+              loanAmount: '',
+              loanPurpose: '',
+              returnDate: '',
+              bankName: '',
+              accountNumber: '',
+              accountType: '',
+              employmentContract: null,
+              investmentType: '',
+              investmentAmount: '',
+              investmentTerm: '',
+              paypalEmail: ''
+            })
+            setIsLoanModalOpen(false);
+            setCurrentStep(1);
+          }, 3000);
+
+        } catch (emailError) {
+          console.error('Error sending confirmation email:', emailError);
+          // Show error message but still close the form
           toast({
             title: "Error",
-            description: "Failed to upload contract. Please try again.",
-            variant: "destructive",
-          })
-          return
+            description: "There was an error sending the confirmation email, but your loan application was submitted successfully.",
+            duration: 5000,
+            className: "bg-yellow-500 text-white",
+          });
+          
+          // Wait for 3 seconds before closing the modal and resetting the form
+          setTimeout(() => {
+            setFormData({
+              fullName: '',
+              email: '',
+              phone: '',
+              address: '',
+              employmentStatus: '',
+              monthlyIncome: '',
+              loanAmount: '',
+              loanPurpose: '',
+              returnDate: '',
+              bankName: '',
+              accountNumber: '',
+              accountType: '',
+              employmentContract: null,
+              investmentType: '',
+              investmentAmount: '',
+              investmentTerm: '',
+              paypalEmail: ''
+            })
+            setIsLoanModalOpen(false);
+            setCurrentStep(1);
+          }, 3000);
         }
-      }
 
-      // Calculate returning amount (40% interest)
-      const returningAmount = parseFloat(formData.loanAmount) * 1.4
-
-      // Insert loan application
-      const { error: insertError } = await supabase
-        .from('loan_applications')
-        .insert({
-          user_id: session.user.id,
-          amount: parseFloat(formData.loanAmount),
-          term: parseInt(formData.returnDate),
-          purpose: formData.loanPurpose,
-          status: 'pending',
-          returning_amount: returningAmount,
-          employment_status: formData.employmentStatus,
-          monthly_income: parseFloat(formData.monthlyIncome),
-          ...documentUrls,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+      } catch (dbError) {
+        console.error('Error creating loan record:', dbError)
+        toast({
+          title: "Error",
+          description: "Failed to create loan record. Please try again.",
+          variant: "destructive",
         })
-
-      if (insertError) {
-        console.error('Insert error:', insertError)
-        throw new Error('Failed to save loan application')
       }
-
-      // Show success message after all processing is complete
-      toast({
-        title: "Application Submitted Successfully!",
-        description: "Your loan application has been received. Please wait within 24 hours for approval. We will contact you shortly.",
-        variant: "default",
-        duration: 5000,
-      })
-
-      // Reset form and close modal after showing success message
-      setTimeout(() => {
-        setFormData({
-          fullName: "",
-          email: "",
-          phone: "",
-          address: "",
-          employmentStatus: "",
-          monthlyIncome: "",
-          loanAmount: "",
-          loanPurpose: "",
-          returnDate: "",
-          bankName: "",
-          accountNumber: "",
-          accountType: "",
-          bankStatement: null,
-          proofOfId: null,
-          employmentContract: null,
-        })
-        setCurrentStep(1)
-        setIsLoanModalOpen(false)
-      }, 1000)
-
     } catch (error) {
       console.error('Error submitting loan:', error)
       toast({
@@ -664,7 +777,7 @@ export default function UserDashboard() {
     }
   }
 
-  const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+  const handleChangePassword = async () => {
     try {
       const { error } = await supabase.auth.updateUser({
         password: newPassword
@@ -1101,67 +1214,99 @@ export default function UserDashboard() {
     }
   }
 
+  const handleSignOut = () => {
+    try {
+      // Clear auth state
+      authState.logout()
+      
+      // Clear any local storage
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('userData')
+      }
+      
+      // Redirect to home page
+      window.location.href = '/'
+    } catch (error) {
+      console.error('Error during sign out:', error)
+      // Still try to redirect even if there's an error
+      window.location.href = '/'
+    }
+  }
+
   return (
     <div className={styles.dashboardContainer}>
-      <div className="p-4 border-b border-white/10">
-        <div className="flex justify-between items-start mb-4">
+      <div className="p-4 border-b border-white/10 mt-16">
+        <div className="flex justify-between items-center">
             <div>
-            <h1 className="text-xl font-semibold">Welcome back, {userProfile?.full_name?.split(' ')[0] || 'Green'}!</h1>
-            <p className="text-sm text-white/60">Here's an overview of your loan spaces.</p>
+            <h1 className="text-xl font-semibold text-sky-400">Welcome back, {userProfile?.full_name || 'User'}!</h1>
+            <p className="text-sm text-sky-400/80">Here's an overview of your loan spaces.</p>
           </div>
-          <div className="flex gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <UserCircle className="h-5 w-5 text-white/70" />
+              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-green-500 text-white">
+                    {getUserInitial(userProfile?.full_name)}
+                  </AvatarFallback>
+                </Avatar>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 bg-[#111111] border-white/10">
-                <div className="px-2 py-1.5 border-b border-white/10">
-                  <p className="text-sm font-medium">{userProfile?.full_name || 'User'}</p>
-                  <p className="text-xs text-white/60">{userProfile?.email || 'email@example.com'}</p>
+            <DropdownMenuContent className="w-56" align="end" forceMount>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">{userProfile?.full_name}</p>
+                  <p className="text-xs leading-none text-muted-foreground">
+                    {userProfile?.email}
+                  </p>
                 </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setIsProfileModalOpen(true)}>
                   <User className="mr-2 h-4 w-4" />
                   <span>Update Profile</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)}>
-                  <Settings className="mr-2 h-4 w-4" />
+                <Key className="mr-2 h-4 w-4" />
                   <span>Change Password</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut} className="text-red-400">
+              <DropdownMenuItem onClick={handleSignOut}>
                   <LogOut className="mr-2 h-4 w-4" />
-                  <span>Sign Out</span>
+                <span>Sign out</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button variant="ghost" size="icon">
-              <Bell className="h-4 w-4 text-white/70" />
-            </Button>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+      <div className="flex justify-center items-center space-x-4 mb-8">
           <button 
             onClick={() => setIsLoanModalOpen(true)}
-            className="bg-orange-500 hover:bg-orange-600 rounded-lg p-2 text-center"
+          className="w-40 px-4 py-2 bg-gradient-to-r from-green-500 via-green-400 to-green-600 text-white rounded-lg shadow-[0_0_15px_rgba(34,197,94,0.3)] hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] transition-all duration-300 transform hover:scale-105 flex items-center justify-center space-x-2 group relative overflow-hidden"
           >
-            <Plus className="h-4 w-4 mx-auto mb-1" />
-            <span className="text-xs">Apply for Loan</span>
+          <div className="absolute inset-0 bg-gradient-to-r from-green-400/20 to-transparent animate-pulse"></div>
+          <svg className="w-4 h-4 transform group-hover:rotate-12 transition-transform duration-300 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-sm font-semibold relative z-10">Apply Loan</span>
           </button>
           <button 
             onClick={() => setIsInvestmentModalOpen(true)}
-            className="bg-sky-500 hover:bg-sky-600 rounded-lg p-2 text-center"
+          className="w-40 px-4 py-2 bg-gradient-to-r from-orange-500 via-orange-400 to-orange-600 text-white rounded-lg shadow-[0_0_15px_rgba(249,115,22,0.3)] hover:shadow-[0_0_25px_rgba(249,115,22,0.5)] transition-all duration-300 transform hover:scale-105 flex items-center justify-center space-x-2 group relative overflow-hidden"
           >
-            <FileText className="h-4 w-4 mx-auto mb-1" />
-            <span className="text-xs">Invest</span>
+          <div className="absolute inset-0 bg-gradient-to-r from-orange-400/20 to-transparent animate-pulse"></div>
+          <svg className="w-4 h-4 transform group-hover:rotate-12 transition-transform duration-300 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          </svg>
+          <span className="text-sm font-semibold relative z-10">Invest</span>
           </button>
         </div>
-      </div>
+
       {/* Main Content */}
       <div className={styles.mainContent}>
         <div className="mb-4">
-          <h2 className="text-base font-medium">Loan Overview</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-white">Loan Overview</h2>
+          </div>
           <p className="text-xs text-white/60">month to view details</p>
         </div>
 
@@ -1612,10 +1757,20 @@ export default function UserDashboard() {
       <Dialog open={isProfileModalOpen} onOpenChange={setIsProfileModalOpen}>
         <DialogContent className="bg-[#111111] text-white border-white/10 max-w-sm">
           <DialogHeader className="space-y-1">
+            <div className="flex items-center justify-between">
             <DialogTitle className="text-base font-medium flex items-center gap-2">
               <div className="h-4 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
               Edit Profile
             </DialogTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsProfileModalOpen(false)}
+                className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/5"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
             <DialogDescription className="text-white/60 text-xs">
               Update your personal information
             </DialogDescription>
@@ -1646,50 +1801,9 @@ export default function UserDashboard() {
                 onChange={(e) => handleUpdateProfile({ address: e.target.value })}
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Date of Birth</Label>
-              <Input
-                type="date"
-                defaultValue={userProfile?.date_of_birth || ''}
-                className="bg-white/5 border-0 text-sm h-8"
-                onChange={(e) => handleUpdateProfile({ date_of_birth: e.target.value })}
-                      />
-                    </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Employment Status</Label>
-              <Select 
-                onValueChange={(value) => handleUpdateProfile({ employment_status: value })}
-                defaultValue={userProfile?.employment_status || undefined}
-              >
-                <SelectTrigger className="bg-white/5 border-0 text-sm h-8">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent className="bg-[#111111] border-white/10">
-                  <SelectItem value="employed">Employed</SelectItem>
-                  <SelectItem value="self-employed">Self Employed</SelectItem>
-                  <SelectItem value="unemployed">Unemployed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Monthly Income</Label>
-              <Input
-                type="number"
-                defaultValue={userProfile?.monthly_income || ''}
-                className="bg-white/5 border-0 text-sm h-8"
-                onChange={(e) => handleUpdateProfile({ monthly_income: parseFloat(e.target.value) })}
-              />
-            </div>
           </div>
 
-          <div className="flex justify-end gap-2 mt-2">
-            <Button
-              variant="outline"
-              onClick={() => setIsProfileModalOpen(false)}
-              className="border-white/10 hover:bg-white/5 h-8 text-xs"
-            >
-              Cancel
-                  </Button>
+          <div className="flex justify-end mt-2">
             <Button
               onClick={() => setIsProfileModalOpen(false)}
               className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 h-8 text-xs"
@@ -1704,52 +1818,55 @@ export default function UserDashboard() {
       <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
         <DialogContent className="bg-[#111111] text-white border-white/10 max-w-sm">
           <DialogHeader className="space-y-1">
+            <div className="flex items-center justify-between">
             <DialogTitle className="text-base font-medium flex items-center gap-2">
               <div className="h-4 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
               Change Password
             </DialogTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsPasswordModalOpen(false)}
+                className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/5"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
             <DialogDescription className="text-white/60 text-xs">
-              Enter your new password below
+              Enter your current and new password
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <div className="space-y-2 py-2">
             <div className="space-y-1">
               <Label className="text-xs">Current Password</Label>
               <Input
                 type="password"
-                placeholder="Enter current password"
                 className="bg-white/5 border-0 text-sm h-8"
+                onChange={(e) => setCurrentPassword(e.target.value)}
               />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">New Password</Label>
               <Input
                 type="password"
-                placeholder="Enter new password"
                 className="bg-white/5 border-0 text-sm h-8"
+                onChange={(e) => setNewPassword(e.target.value)}
               />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Confirm New Password</Label>
               <Input
                 type="password"
-                placeholder="Confirm new password"
                 className="bg-white/5 border-0 text-sm h-8"
+                onChange={(e) => setConfirmPassword(e.target.value)}
               />
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 mt-2">
+          <div className="flex justify-end mt-2">
             <Button
-              variant="outline"
-              onClick={() => setIsPasswordModalOpen(false)}
-              className="border-white/10 hover:bg-white/5 h-8 text-xs"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => handleChangePassword('currentPassword', 'newPassword')}
+              onClick={handleChangePassword}
               className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 h-8 text-xs"
             >
               Update Password
@@ -2758,7 +2875,7 @@ export default function UserDashboard() {
                                   ? 'bg-red-500/60 text-white'
                                   : 'bg-blue-500/60 text-white'
                               }`}>
-                                {getInitials(member.names || "Member")}
+                                {getUserInitial(member.names || "Member")}
                               </AvatarFallback>
                             </Avatar>
                             <div className="text-center">
@@ -2825,7 +2942,7 @@ export default function UserDashboard() {
                 <div className="flex items-center justify-center mb-4">
                   <Avatar className="h-20 w-20 border-4 border-white/40 shadow-lg">
                     <AvatarFallback className="text-2xl bg-green-500/60 text-white">
-                      {getInitials(selectedMember.names || "Member")}
+                      {getUserInitial(selectedMember.names || "Member")}
                     </AvatarFallback>
                   </Avatar>
                 </div>
@@ -3003,6 +3120,29 @@ export default function UserDashboard() {
                 )}
               </Button>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Dialog */}
+      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <DialogContent className="sm:max-w-md bg-[#111111] text-white border-white/10">
+          <DialogHeader>
+            <DialogTitle className="text-green-500 text-xl">Loan Application Submitted!</DialogTitle>
+            <DialogDescription className="text-white/70">
+              Confirmation email sent successfully to: {userEmail}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <p className="text-white/60">Your loan application has been received and is currently under review. We will notify you once a decision has been made.</p>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={() => setShowSuccessDialog(false)}
+              className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-white"
+            >
+              Close
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

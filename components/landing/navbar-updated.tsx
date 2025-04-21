@@ -23,8 +23,8 @@ export function Navbar() {
 
   const Logo = (
     <div className="flex items-center space-x-1.5">
-      <div className="relative w-7 h-7">
-        <Image src="/images/logo.png" alt="Green Fina Logo" width={28} height={28} className="object-contain" />
+      <div className="relative w-7 h-7 flex items-center justify-center bg-green-500 rounded-full">
+        <span className="text-white font-bold text-lg">U</span>
       </div>
       <div className="flex items-center">
         <span className="text-lg font-bold text-green-400 mr-0.5 futuristic-text">Green</span>

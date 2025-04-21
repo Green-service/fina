@@ -8,7 +8,7 @@ const people = [
     designation: "Software Developer",
     image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/khudi.jpg-Vo3WGvbh4LqD5CPc1vwx8MppPjuXf7.jpeg",
     testimonial:
-      "As a developer, Green Fina's API and documentation are top-notch. I integrated their payment system into my startup's platform in just a few hours. Their developer support team is incredibly responsive!",
+      "Green Fina helped me pay my school fees when I was struggling to complete my degree. Their student loan program made it possible for me to graduate and start my career in tech.",
     rating: 5,
   },
   {
@@ -17,7 +17,7 @@ const people = [
     designation: "Business Owner",
     image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/mahlatse.jpg-AgyMoKXMPJrdI1QHRtPhdbw5uSqJPj.jpeg",
     testimonial:
-      "Green Fina helped me secure funding for my restaurant when traditional banks turned me down. Their business loan application process was straightforward, and the AI recommendations were spot on!",
+      "Thanks to Green Fina's business loan, I was able to expand my restaurant and hire more staff. Their flexible repayment terms helped me manage my cash flow during the initial growth phase.",
     rating: 5,
   },
   {
@@ -26,7 +26,7 @@ const people = [
     designation: "General Worker",
     image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/nhlamulo.jpg-UShuqq7tBkvjYnu9E1Zu08EbmVFIxm.jpeg",
     testimonial:
-      "The stokvela feature on Green Fina has transformed how our community saves money. It's transparent, easy to use, and has helped me save consistently for the first time in my life.",
+      "Green Fina's stokvela feature helped me save for my daughter's wedding. The community support and regular contributions made it possible to give her the celebration she deserved.",
     rating: 4,
   },
   {
@@ -35,7 +35,7 @@ const people = [
     designation: "Software Developer",
     image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/clinton.jpg-13RhA44MwjMEpvMMjgWIj2aI2ZMri9.jpeg",
     testimonial:
-      "Green Fina's student loan helped me complete my programming bootcamp. Their flexible repayment terms and low interest rates made it possible for me to focus on learning without financial stress.",
+      "When I needed emergency funds for my mother's medical treatment, Green Fina's quick loan approval process came through. Their compassionate approach made a difficult time much easier.",
     rating: 5,
   },
 ]

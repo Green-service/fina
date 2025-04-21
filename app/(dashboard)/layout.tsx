@@ -1,5 +1,3 @@
-import { SessionCheck } from '@/components/session-check'
-
 export default function DashboardLayout({
   children,
 }: {
@@ -7,7 +5,6 @@ export default function DashboardLayout({
 }) {
   return (
     <>
-      <SessionCheck />
       {children}
     </>
   )

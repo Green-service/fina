@@ -22,16 +22,3 @@ export async function createServerSupabaseClient() {
   })
 }
 
-// Get the current user session
-export async function getSession() {
-  const supabase = await createServerSupabaseClient()
-  return await supabase.auth.getSession()
-}
-
-// Get the current user
-export async function getCurrentUser() {
-  const {
-    data: { session },
-  } = await getSession()
-  return session?.user || null
-}

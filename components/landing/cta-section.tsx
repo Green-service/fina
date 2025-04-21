@@ -24,7 +24,10 @@ export function CTASection() {
         style={{ animationDuration: "12s" }}
       />
 
-      <div className="container relative z-10 mx-auto px-4 sm:px-6 lg:px-8">
+      {/* Fade effect at the bottom */}
+      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#030303] to-transparent z-10"></div>
+
+      <div className="container relative z-20 mx-auto px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-3xl md:text-5xl font-bold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-green-400 via-white/90 to-sky-400">
             Ready to Transform Your Financial Future?
@@ -33,21 +36,13 @@ export function CTASection() {
             Join thousands of users who are already managing their finances smarter with Green Fina. Get started today
             and take control of your financial journey.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex justify-center">
             <Button
               size="lg"
               className="get-started-button bg-gradient-to-r from-green-500 to-sky-500 text-white border-none font-semibold"
               onClick={() => setIsRegistrationModalOpen(true)}
             >
               Apply for Loan <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-            <Button
-              asChild
-              variant="outline"
-              size="lg"
-              className="border-white/10 hover:border-white/20 text-white/80 hover:text-white"
-            >
-              <Link href="#features">Learn More</Link>
             </Button>
           </div>
         </div>

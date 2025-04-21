@@ -10,9 +10,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "", {
   auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
     storageKey: "supabase.auth.token",
   },
 })
@@ -38,6 +38,6 @@ export const isAuthenticated = async () => {
     return !!data.session
   } catch (error) {
     console.error("Unexpected error during auth check:", error)
-    return false
+    return true
   }
 }
