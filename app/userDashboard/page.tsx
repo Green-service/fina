@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -34,6 +35,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Loader2 } from "lucide-react"
 import { authState } from '@/lib/auth-state'
 import emailjs from '@emailjs/browser'
+import LoanHistoryLimits from '@/components/LoanHistoryLimits'
 
 interface UserProfile {
   id: string
@@ -78,10 +80,54 @@ interface FormData {
   paypalEmail: string
 }
 
+interface InvestmentFormData {
+  fullName: string;
+  email: string;
+  phone: string;
+  bankName: string;
+  accountNumber: string;
+  accountType: string;
+  investmentType: string;
+  investmentAmount: string;
+  investmentTerm: string;
+  paymentProof: File | null;
+}
+
+interface UserInvestment {
+  id: string;
+  userId: string;
+  amount: number;
+  term: number;
+  paymentProofUrl: string;
+  status: string;
+  createdAt: string;
+  investment_type: string;
+}
+
+// Add this interface near the top with other interfaces
+interface Activity {
+  id: string;
+  type: 'loan' | 'investment' | 'stokvela';
+  title: string;
+  status: string;
+  amount: number;
+  timestamp: string;
+  description: string;
+}
+
+interface StokvelaJoinForm {
+  names: string;
+  email: string;
+  cellphone_number: string;
+  account_number: string;
+  account_name: string;
+  account_type: string;
+}
+
 export default function UserDashboard() {
   const { user, userRole, isLoading: authLoading} = useAuth()
   const router = useRouter()
-  const supabase = createClient()
+  const supabaseRef = useRef<any>(null)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
@@ -89,7 +135,7 @@ export default function UserDashboard() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('loans')
+  const [activeTab, setActiveTab] = useState('profile')
   const [userLoans, setUserLoans] = useState<any[]>([])
   const [userInvestments, setUserInvestments] = useState<any[]>([])
   const [isLoadingLoans, setIsLoadingLoans] = useState(false)
@@ -136,18 +182,18 @@ export default function UserDashboard() {
     paypalEmail: ''
   })
 
-  const [investmentFormData, setInvestmentFormData] = useState({
+  const [investmentFormData, setInvestmentFormData] = useState<InvestmentFormData>({
     fullName: "",
     email: "",
     phone: "",
     bankName: "",
     accountNumber: "",
     accountType: "",
-    investmentType: "",
+    investmentType: "j", // Default to 'j' as per your schema
     investmentAmount: "",
-    investmentTerm: "",
-    paypalEmail: ""
-  })
+    investmentTerm: "12", // Default to 12 months
+    paymentProof: null
+  });
 
   const [isMaximized, setIsMaximized] = useState(false)
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
@@ -163,6 +209,37 @@ export default function UserDashboard() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showSuccessDialog, setShowSuccessDialog] = useState(false)
   const [userEmail, setUserEmail] = useState<string>("")
+  const [uploadProgress, setUploadProgress] = useState(0)
+  // Add this state near other state declarations
+  const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
+
+  // Add state for join form
+  const [joinFormData, setJoinFormData] = useState<StokvelaJoinForm>({
+    names: '',
+    email: '',
+    cellphone_number: '',
+    account_number: '',
+    account_name: '',
+    account_type: ''
+  });
+
+  const [isJoinFormOpen, setIsJoinFormOpen] = useState(false);
+  const [selectedStokvelaForJoin, setSelectedStokvelaForJoin] = useState<any>(null);
+
+  // Initialize Supabase client
+  useEffect(() => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient()
+    }
+  }, [])
+
+  // Ensure supabaseRef is available before using it
+  const getSupabaseClient = () => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient()
+    }
+    return supabaseRef.current
+  }
 
   // Add the getInitials function near the top of the component
   const getUserInitial = (name: string | null | undefined) => {
@@ -174,11 +251,11 @@ export default function UserDashboard() {
   const handleViewStokvelaDetails = async (stokvela: any) => {
     try {
       setIsLoadingMembers(true);
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabaseRef.current.auth.getSession();
       if (!session?.user) return;
 
       // Get all members of this stokvela group
-      const { data: members, error } = await supabase
+      const { data: members, error } = await supabaseRef.current
         .from('stokvela_members')
         .select('*')
         .eq('group_id', stokvela.id)
@@ -186,43 +263,8 @@ export default function UserDashboard() {
 
       if (error) throw error;
       
-      // Fetch user profiles for each member to get email and phone
-      const membersWithProfiles = await Promise.all(
-        (members || []).map(async (member) => {
-          try {
-            const { data: profile, error: profileError } = await supabase
-              .from('profiles')
-              .select('email, phone')
-              .eq('id', member.user_id)
-              .single();
-              
-            if (profileError) {
-              // Silently handle the error and return member without profile data
-              return {
-                ...member,
-                email: 'N/A',
-                phone: 'N/A'
-              };
-            }
-            
-            return {
-              ...member,
-              email: profile?.email || 'N/A',
-              phone: profile?.phone || 'N/A'
-            };
-          } catch (err) {
-            // Handle any unexpected errors
-            return {
-              ...member,
-              email: 'N/A',
-              phone: 'N/A'
-            };
-          }
-        })
-      );
-      
       setSelectedStokvela(stokvela);
-      setStokvelaMembers(membersWithProfiles || []);
+      setStokvelaMembers(members || []);
       setIsStokvelaDetailsOpen(true);
     } catch (error) {
       console.error('Error fetching stokvela members:', error);
@@ -245,7 +287,7 @@ export default function UserDashboard() {
         return
       }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseRef.current
           .from('users_account')
         .select('*')
           .eq('email', authUser.email)
@@ -284,7 +326,7 @@ export default function UserDashboard() {
           const userId = authState.getUserId()
           if (!userId) return
 
-          const { data: loans, error } = await supabase
+          const { data: loans, error } = await supabaseRef.current
             .from('loan_applications')
             .select('*')
             .eq('user_id', userId)
@@ -313,7 +355,7 @@ export default function UserDashboard() {
       const userId = authState.getUserId()
       if (!userId) return
 
-      const { data, error } = await supabase
+      const { data, error } = await supabaseRef.current
         .from('investments')
         .select('*')
         .eq('user_id', userId)
@@ -345,31 +387,51 @@ export default function UserDashboard() {
       if (activeTab === 'stokvela') {
         setIsLoadingStokvelas(true)
         try {
-          const { data: stokvelas, error } = await supabase
+          const userId = authState.getUserId();
+          if (!userId) return;
+
+          const { data: stokvelas, error } = await supabaseRef.current
             .from('stokvela_groups')
             .select('*')
             .order('created_at', { ascending: false })
 
           if (error) throw error
           
-          // Fetch member count for each stokvela
-          const stokvelasWithMemberCount = await Promise.all(
+          // Fetch member count and check user membership for each stokvela
+          const stokvelasWithDetails = await Promise.all(
             (stokvelas || []).map(async (stokvela) => {
-              const { count, error: countError } = await supabase
+              // Get member count
+              const { count, error: countError } = await supabaseRef.current
                 .from('stokvela_members')
                 .select('*', { count: 'exact', head: true })
                 .eq('group_id', stokvela.id)
               
               if (countError) {
                 console.error('Error fetching member count:', countError)
-                return { ...stokvela, member_count: 0 }
+                return { ...stokvela, member_count: 0, is_member: false }
+              }
+
+              // Check if user is a member
+              const { data: membership, error: membershipError } = await supabaseRef.current
+                .from('stokvela_members')
+                .select('*')
+                .eq('group_id', stokvela.id)
+                .eq('user_id', userId)
+                .single()
+
+              if (membershipError && membershipError.code !== 'PGRST116') {
+                console.error('Error checking membership:', membershipError)
               }
               
-              return { ...stokvela, member_count: count || 0 }
+              return { 
+                ...stokvela, 
+                member_count: count || 0,
+                is_member: !!membership
+              }
             })
           )
           
-          setUserStokvelas(stokvelasWithMemberCount || [])
+          setUserStokvelas(stokvelasWithDetails || [])
         } catch (error) {
           console.error('Error fetching stokvelas:', error)
           toast({
@@ -386,6 +448,80 @@ export default function UserDashboard() {
     fetchStokvelas()
   }, [activeTab])
 
+  useEffect(() => {
+    const fetchRecentActivities = async () => {
+      try {
+        const userId = authState.getUserId();
+        if (!userId) return;
+
+        // Fetch recent loans
+        const { data: loans } = await supabaseRef.current
+          .from('loan_applications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        // Fetch recent investments
+        const { data: investments } = await supabaseRef.current
+          .from('investments')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        // Fetch recent stokvela memberships
+        const { data: stokvelas } = await supabaseRef.current
+          .from('stokvela_members')
+          .select('*, stokvelas(name)')
+          .eq('user_id', userId)
+          .order('joined_at', { ascending: false })
+          .limit(5);
+
+        // Combine and format activities
+        const activities: Activity[] = [
+          ...(loans || []).map(loan => ({
+            id: loan.id,
+            type: 'loan',
+            title: loan.loan_purpose || 'Loan Application',
+            status: loan.status,
+            amount: parseFloat(loan.amount),
+            timestamp: loan.created_at,
+            description: `Loan for ${loan.loan_purpose}`
+          })),
+          ...(investments || []).map(inv => ({
+            id: inv.id,
+            type: 'investment',
+            title: inv.investment_type === 'j' ? 'Joint Investment' : 'Individual Investment',
+            status: inv.status,
+            amount: inv.amount,
+            timestamp: inv.created_at,
+            description: `${inv.investment_type === 'j' ? 'Joint' : 'Individual'} investment`
+          })),
+          ...(stokvelas || []).map(stok => ({
+            id: stok.id,
+            type: 'stokvela',
+            title: stok.stokvels?.name || 'Stokvela Group',
+            status: stok.verified === 1 ? 'verified' : 'pending',
+            amount: stok.amount_contibuted || 0,
+            timestamp: stok.joined_at,
+            description: `Joined ${stok.stokvels?.name || 'a stokvela group'}`
+          }))
+        ];
+
+        // Sort by timestamp and take the 5 most recent
+        const sortedActivities = activities
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 5);
+
+        setRecentActivities(sortedActivities);
+      } catch (error) {
+        console.error('Error fetching recent activities:', error);
+      }
+    };
+
+    fetchRecentActivities();
+  }, [user?.id]);
 
   const validateStep = (step: number) => {
     switch (step) {
@@ -503,7 +639,7 @@ export default function UserDashboard() {
       const filePath = `${userId}/${folder}/${timestamp}-${cleanFileName}`
       
       // Upload file to existing bucket with better error handling
-      const { error: uploadError, data } = await supabase.storage
+      const { error: uploadError, data } = await supabaseRef.current.storage
         .from('ducuments')
         .upload(filePath, file, {
           cacheControl: '3600',
@@ -525,7 +661,7 @@ export default function UserDashboard() {
       }
 
       // Get the public URL for the file
-      const { data: { publicUrl } } = supabase
+      const { data: { publicUrl } } = supabaseRef.current
         .storage
         .from('ducuments')
         .getPublicUrl(filePath)
@@ -547,7 +683,7 @@ export default function UserDashboard() {
         return
       }
 
-      const { data: { session } } = await supabase.auth.getSession()
+      const { data: { session } } = await supabaseRef.current.auth.getSession()
       if (!session?.user) {
         toast({
           title: "Error",
@@ -596,9 +732,9 @@ export default function UserDashboard() {
 
       // Create loan application
       try {
-        // Calculate returning amount (40% interest)
-        const returningAmount = parseFloat(formData.loanAmount) * 1.4
-        
+      // Calculate returning amount (40% interest)
+      const returningAmount = parseFloat(formData.loanAmount) * 1.4
+
         // Calculate term in months (assuming returnDate is in format YYYY-MM-DD)
         const returnDate = new Date(formData.returnDate)
         const today = new Date()
@@ -606,23 +742,23 @@ export default function UserDashboard() {
                           (returnDate.getMonth() - today.getMonth())
         const termInMonths = Math.max(1, monthsDiff) // Ensure at least 1 month
 
-        const { error } = await supabase
-          .from('loan_applications')
-          .insert({
+        const { error } = await supabaseRef.current
+        .from('loan_applications')
+        .insert({
             user_id: userId,
-            amount: parseFloat(formData.loanAmount),
-            purpose: formData.loanPurpose,
+          amount: parseFloat(formData.loanAmount),
+          purpose: formData.loanPurpose,
             term: termInMonths, // Use calculated months instead of date string
             returning_date: formData.returnDate,
             bank_statement_url: documentUrls.bank_statement_url,
             id_document_url: documentUrls.id_document_url,
-            status: 'pending',
-            employment_status: formData.employmentStatus,
-            monthly_income: parseFloat(formData.monthlyIncome),
+          status: 'pending',
+          employment_status: formData.employmentStatus,
+          monthly_income: parseFloat(formData.monthlyIncome),
             returning_amount: returningAmount,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
 
         if (error) {
           console.error('Database error:', error)
@@ -642,7 +778,7 @@ export default function UserDashboard() {
           })
           
           // Get the user's email directly from the session
-          const { data: { session } } = await supabase.auth.getSession()
+          const { data: { session } } = await supabaseRef.current.auth.getSession()
           if (!session?.user) {
             throw new Error("User session not found")
           }
@@ -699,16 +835,16 @@ export default function UserDashboard() {
         } catch (emailError) {
           console.error('Error sending confirmation email:', emailError);
           // Show error message but still close the form
-          toast({
+      toast({
             title: "Error",
             description: "There was an error sending the confirmation email, but your loan application was submitted successfully.",
-            duration: 5000,
+        duration: 5000,
             className: "bg-yellow-500 text-white",
           });
-          
+
           // Wait for 3 seconds before closing the modal and resetting the form
-          setTimeout(() => {
-            setFormData({
+      setTimeout(() => {
+        setFormData({
               fullName: '',
               email: '',
               phone: '',
@@ -721,7 +857,7 @@ export default function UserDashboard() {
               bankName: '',
               accountNumber: '',
               accountType: '',
-              employmentContract: null,
+          employmentContract: null,
               investmentType: '',
               investmentAmount: '',
               investmentTerm: '',
@@ -755,7 +891,7 @@ export default function UserDashboard() {
   const handleUpdateProfile = async (updatedData: Partial<UserProfile>) => {
     if (!userProfile?.id) return
 
-    const { error } = await supabase
+    const { error } = await supabaseRef.current
       .from('profiles')
       .update(updatedData)
       .eq('id', userProfile.id)
@@ -766,7 +902,7 @@ export default function UserDashboard() {
     }
 
     // Refresh profile data
-    const { data: profileData } = await supabase
+    const { data: profileData } = await supabaseRef.current
       .from('profiles')
       .select('*')
       .eq('id', userProfile.id)
@@ -779,7 +915,7 @@ export default function UserDashboard() {
 
   const handleChangePassword = async () => {
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { error } = await supabaseRef.current.auth.updateUser({
         password: newPassword
       })
 
@@ -920,7 +1056,7 @@ export default function UserDashboard() {
 
   const handleWithdrawLoan = async (loanId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseRef.current
         .from('loan_applications')
         .delete()
         .eq('id', loanId)
@@ -1233,6 +1369,608 @@ export default function UserDashboard() {
     }
   }
 
+  const validateInvestmentForm = () => {
+    if (!investmentFormData) {
+      toast({
+        title: "Error",
+        description: "Form data is not initialized",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (!investmentFormData.fullName) {
+      toast({
+        title: "Missing Information",
+        description: "Please enter your full name",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (!investmentFormData.investmentAmount) {
+      toast({
+        title: "Missing Information",
+        description: "Please enter investment amount",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    // Validate minimum investment amount
+    const minInvestmentAmount = 1000;
+    if (parseFloat(investmentFormData.investmentAmount) < minInvestmentAmount) {
+      toast({
+        title: "Invalid Amount",
+        description: `Minimum investment amount is R${minInvestmentAmount}`,
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (!investmentFormData.investmentTerm) {
+      toast({
+        title: "Missing Information",
+        description: "Please select investment term",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    // Validate investment term
+    const term = parseInt(investmentFormData.investmentTerm);
+    if (term < 3 || term > 60) {
+      toast({
+        title: "Invalid Term",
+        description: "Investment term must be between 3 and 60 months",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (!investmentFormData.paymentProof) {
+      toast({
+        title: "Missing Information",
+        description: "Please upload proof of payment",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    // Validate file type and size
+    const allowedFileTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+    const maxFileSize = 5 * 1024 * 1024; // 5MB
+
+    if (!allowedFileTypes.includes(investmentFormData.paymentProof.type)) {
+      toast({
+        title: "Invalid File Type",
+        description: "Please upload a JPG, PNG or PDF file",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (investmentFormData.paymentProof.size > maxFileSize) {
+      toast({
+        title: "File Too Large",
+        description: "File size must be less than 5MB",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSubmitInvestment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateInvestmentForm()) {
+      return;
+    }
+
+    setIsInvestmentSubmitting(true);
+    setUploadProgress(0);
+
+    try {
+      if (!user?.id) {
+        throw new Error('User not authenticated');
+      }
+
+      // First upload the payment proof
+      const formData = new FormData();
+      formData.append('file', investmentFormData.paymentProof!);
+      formData.append('upload_preset', 'green_fina_uploads');
+
+      const uploadResponse = await fetch(
+        `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload payment proof');
+      }
+
+      const uploadData = await uploadResponse.json();
+      setUploadProgress(100);
+
+      // Calculate expected return (simple calculation - can be adjusted based on your business logic)
+      const amount = parseFloat(investmentFormData.investmentAmount);
+      const term = parseInt(investmentFormData.investmentTerm);
+      const annualReturn = amount * 0.15; // 15% annual return
+      const monthlyReturn = annualReturn / 12;
+      const totalExpectedReturn = amount + (annualReturn * (term / 12));
+
+      // Create the investment
+      const { data, error } = await supabaseRef.current
+        .from('investments')
+        .insert({
+          user_id: user.id,
+          amount: amount,
+          investment_type: investmentFormData.investmentType,
+          term: term,
+          expected_return: totalExpectedReturn,
+          payment_method: 'c', // Default to 'c' as per your schema
+          full_name: investmentFormData.fullName,
+          email: investmentFormData.email,
+          phone: investmentFormData.phone,
+          bank_name: investmentFormData.bankName,
+          account_number: investmentFormData.accountNumber,
+          account_type: investmentFormData.accountType,
+          amount_return_annual: annualReturn,
+          amount_return_monthly: monthlyReturn,
+          payment_proof_url: uploadData.secure_url,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update local state
+      setUserInvestments(prev => [...prev, data]);
+      
+      // Reset form
+      setInvestmentFormData({
+        fullName: "",
+        email: "",
+        phone: "",
+        bankName: "",
+        accountNumber: "",
+        accountType: "",
+        investmentType: "j",
+        investmentAmount: "",
+        investmentTerm: "12",
+        paymentProof: null
+      });
+      
+      // Close the modal
+      setIsInvestmentModalOpen(false);
+      
+      toast({
+        title: "Success",
+        description: "Investment submitted successfully!",
+        variant: "default",
+      });
+
+      // Refresh investments list
+      fetchUserInvestments();
+    } catch (error) {
+      console.error('Error submitting investment:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to submit investment. Please try again.',
+        variant: "destructive",
+      });
+    } finally {
+      setIsInvestmentSubmitting(false);
+      setUploadProgress(0);
+    }
+  };
+
+  const handleWithdrawInvestment = async (investmentId: string) => {
+    try {
+      const { error } = await supabaseRef.current
+        .from('investments')
+        .update({ 
+          status: 'withdrawn',
+          withdrawn_at: new Date().toISOString()
+        })
+        .eq('id', investmentId)
+
+      if (error) throw error
+
+      toast({
+        title: "Success",
+        description: "Investment withdrawn successfully",
+      })
+
+      setIsWithdrawConfirmOpen(false)
+      fetchUserInvestments()
+    } catch (error) {
+      console.error('Error withdrawing investment:', error)
+      toast({
+        title: "Error",
+        description: "Failed to withdraw investment",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleCancelInvestment = async (investmentId: string) => {
+    try {
+      const { error } = await supabaseRef.current
+        .from('investments')
+        .update({ 
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString()
+        })
+        .eq('id', investmentId)
+
+      if (error) throw error
+
+      toast({
+        title: "Success",
+        description: "Investment cancelled successfully",
+      })
+
+      setIsCancelConfirmOpen(false)
+      fetchUserInvestments()
+    } catch (error) {
+      console.error('Error cancelling investment:', error)
+      toast({
+        title: "Error",
+        description: "Failed to cancel investment",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2)
+  }
+
+  const formatDateInWords = (dateString: string) => {
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = date.toLocaleString('default', { month: 'long' });
+    const year = date.getFullYear();
+    
+    // Add ordinal suffix to day
+    const ordinalSuffix = (day: number) => {
+      if (day > 3 && day < 21) return 'th';
+      switch (day % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+      }
+    };
+    
+    return `${day}${ordinalSuffix(day)} of ${month} ${year}`;
+  };
+
+  const handleViewMemberDetails = (member: any) => {
+    console.log('Viewing member details:', member);
+    setSelectedMember(member);
+    setIsMemberDetailsOpen(true);
+    console.log('Dialog state:', { isMemberDetailsOpen: true, selectedMember: member });
+  };
+
+  const handlePayNow = (member: any) => {
+    try {
+      // First set the member
+      setSelectedMemberForPayment(member);
+      
+      // Then reset the form
+      setPaymentStep(1);
+      setPaymentAmount("");
+      setPaymentSignature("");
+      setPaymentProof(null);
+      
+      // Finally open the dialog
+      setIsPaymentDialogOpen(true);
+      
+      console.log('Payment dialog opened for member:', member);
+    } catch (error) {
+      console.error('Error opening payment dialog:', error);
+      toast({
+        title: "Error",
+        description: "Failed to open payment dialog. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handlePaymentProofChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setPaymentProof(e.target.files[0])
+    }
+  }
+
+  const handleSubmitPayment = async () => {
+    if (!selectedMemberForPayment || !paymentAmount || !paymentSignature || !paymentProof) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSubmittingPayment(true)
+    try {
+      const { data: { session } } = await supabaseRef.current.auth.getSession()
+      if (!session?.user) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to make a payment",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Upload proof of payment to storage
+      const fileExt = paymentProof.name.split('.').pop()
+      const fileName = `${session.user.id}_${selectedMemberForPayment.id}_${Date.now()}.${fileExt}`
+      const { error: uploadError } = await supabaseRef.current.storage
+        .from('ducuments')
+        .upload(`payment_proofs/${fileName}`, paymentProof)
+
+      if (uploadError) {
+        console.error('Error uploading payment proof:', uploadError)
+        throw new Error('Failed to upload payment proof')
+      }
+
+      // Get the public URL for the uploaded file
+      const { data: { publicUrl } } = supabaseRef.current.storage
+        .from('ducuments')
+        .getPublicUrl(`payment_proofs/${fileName}`)
+
+      // Get the position 1 member of the stokvela group
+      const { data: positionOneMember, error: memberError } = await supabaseRef.current
+        .from('stokvela_members')
+        .select('*')
+        .eq('group_id', selectedMemberForPayment.group_id)
+        .eq('position', 1)
+        .single()
+
+      if (memberError) {
+        console.error('Error fetching position 1 member:', memberError)
+        throw new Error('Failed to fetch position 1 member')
+      }
+
+      // Get current amounts
+      const { data: currentPayer, error: payerError } = await supabaseRef.current
+        .from('stokvela_members')
+        .select('amount_contibuted')
+        .eq('user_id', session.user.id)
+        .eq('group_id', selectedMemberForPayment.group_id)
+        .single()
+
+      if (payerError) {
+        console.error('Error fetching current payer:', payerError)
+        throw new Error('Failed to fetch current payer details')
+      }
+
+      const { data: currentReceiver, error: receiverError } = await supabaseRef.current
+        .from('stokvela_members')
+        .select('amount_received')
+        .eq('id', positionOneMember.id)
+        .single()
+
+      if (receiverError) {
+        console.error('Error fetching current receiver:', receiverError)
+        throw new Error('Failed to fetch current receiver details')
+      }
+
+      // Update the payer's amount contributed (add to existing amount)
+      const { error: updatePayerError } = await supabaseRef.current
+        .from('stokvela_members')
+        .update({ 
+          amount_contibuted: (currentPayer.amount_contibuted || 0) + parseFloat(paymentAmount)
+        })
+        .eq('user_id', session.user.id)
+        .eq('group_id', selectedMemberForPayment.group_id)
+
+      if (updatePayerError) {
+        console.error('Error updating payer amount:', updatePayerError)
+        throw new Error('Failed to update payer amount')
+      }
+
+      // Update the position 1 member's amount received
+      const { error: updateReceiverError } = await supabaseRef.current
+        .from('stokvela_members')
+        .update({ 
+          amount_received: (currentReceiver.amount_received || 0) + parseFloat(paymentAmount)
+        })
+        .eq('id', positionOneMember.id)
+
+      if (updateReceiverError) {
+        console.error('Error updating receiver amount:', updateReceiverError)
+        throw new Error('Failed to update receiver amount')
+      }
+
+      // Update member's payment status
+      const { error: updateError } = await supabaseRef.current
+        .from('stokvela_members')
+        .update({ 
+          payment_status: 'paid',
+          payment_date: new Date().toISOString(),
+          payment_proof_url: publicUrl
+        })
+        .eq('id', selectedMemberForPayment.id)
+
+      if (updateError) {
+        console.error('Error updating payment status:', updateError)
+        throw new Error('Failed to update payment status')
+      }
+
+      // Show loading state
+      toast({
+        title: "Processing Payment",
+        description: "Please wait while we process your payment...",
+        variant: "default",
+        duration: 3000,
+      })
+
+      // Wait for 3 seconds
+      await new Promise(resolve => setTimeout(resolve, 3000))
+
+      // Show success message
+      toast({
+        title: "Payment Successful!",
+        description: "Your payment has been successfully processed and recorded.",
+        variant: "default",
+        duration: 5000,
+        isClosable: true,
+      })
+
+      // Reset form and close modal
+      setPaymentProof(null)
+      setSelectedMemberForPayment(null)
+      setPaymentStep(1)
+      setIsPaymentDialogOpen(false)
+
+      // Refresh the stokvela details
+      if (selectedStokvela) {
+        handleViewStokvelaDetails(selectedStokvela)
+      }
+    } catch (error) {
+      console.error('Error submitting payment:', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        details: error
+      })
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to submit payment. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmittingPayment(false)
+    }
+  }
+
+  const handleNextPaymentStep = () => {
+    if (paymentStep < 3) {
+      setPaymentStep(paymentStep + 1)
+    }
+  }
+
+  const handlePreviousPaymentStep = () => {
+    if (paymentStep > 1) {
+      setPaymentStep(paymentStep - 1)
+    }
+  }
+
+  // Add new function to handle joining stokvela
+  const handleJoinStokvela = (stokvela: any) => {
+    setSelectedStokvelaForJoin(stokvela);
+    setIsJoinFormOpen(true);
+  };
+
+  // Add new function to handle form submission
+  const handleSubmitJoinForm = async () => {
+    try {
+      const userId = authState.getUserId();
+      if (!userId || !selectedStokvelaForJoin) {
+        toast({
+          title: "Error",
+          description: "Missing required information",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Validate form data
+      if (!joinFormData.names || !joinFormData.email || !joinFormData.cellphone_number || 
+          !joinFormData.account_number || !joinFormData.account_name || !joinFormData.account_type) {
+        toast({
+          title: "Missing Information",
+          description: "Please fill in all required fields",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Get the next available position
+      const { data: members } = await supabaseRef.current
+        .from('stokvela_members')
+        .select('position')
+        .eq('group_id', selectedStokvelaForJoin.id)
+        .order('position', { ascending: false })
+        .limit(1);
+
+      const nextPosition = members && members.length > 0 ? members[0].position + 1 : 1;
+
+      // Add user as a member
+      const { error } = await supabaseRef.current
+        .from('stokvela_members')
+        .insert({
+          user_id: userId,
+          group_id: selectedStokvelaForJoin.id,
+          role: 'user',
+          joined_at: new Date().toISOString(),
+          amount_contibuted: 0,
+          amount_received: 0,
+          names: joinFormData.names,
+          position: nextPosition,
+          account_number: joinFormData.account_number,
+          account_name: joinFormData.account_name,
+          account_type: joinFormData.account_type,
+          verified: 0,
+          cellphone_number: joinFormData.cellphone_number,
+          email: joinFormData.email
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "You have successfully joined the stokvela group",
+      });
+
+      // Reset form and close dialog
+      setJoinFormData({
+        names: '',
+        email: '',
+        cellphone_number: '',
+        account_number: '',
+        account_name: '',
+        account_type: ''
+      });
+      setIsJoinFormOpen(false);
+      setSelectedStokvelaForJoin(null);
+
+      // Refresh the stokvelas list by calling the function from the parent scope
+      const { data: updatedStokvelas } = await supabaseRef.current
+        .from('stokvela_groups')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (updatedStokvelas) {
+        setUserStokvelas(updatedStokvelas);
+      }
+    } catch (error) {
+      console.error('Error joining stokvela:', error);
+      toast({
+        title: "Error",
+        description: "Failed to join stokvela group. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className={styles.dashboardContainer}>
       <div className="p-4 border-b border-white/10 mt-16">
@@ -1368,16 +2106,6 @@ export default function UserDashboard() {
               </div>
             </div>
 
-            {/* View All Button */}
-            <div className="flex justify-center">
-              <Button
-                onClick={() => setShowAllLoans(!showAllLoans)}
-                className="bg-orange-500 hover:bg-orange-600 text-white"
-              >
-                {showAllLoans ? 'Hide Loans' : 'View All Loans'}
-              </Button>
-            </div>
-
             {/* Loans List */}
             {showAllLoans && (
               <div className="space-y-3">
@@ -1456,7 +2184,7 @@ export default function UserDashboard() {
                               variant="outline"
                               size="sm"
                               onClick={() => handleViewLoanDetails(loan)}
-                              className="text-white/60 hover:text-white"
+                              className="bg-sky-500/10 text-sky-500 hover:bg-sky-500/20 hover:text-sky-400 border-sky-500/20"
                             >
                               View Details
                             </Button>
@@ -1571,7 +2299,7 @@ export default function UserDashboard() {
                       if (filterStatus !== 'all' && investment.status !== filterStatus) return false
                       if (filterDate === 'all') return true
                       
-                      const investmentDate = new Date(investment.created_at)
+                      const investmentDate = new Date(investment.createdAt)
                       const now = new Date()
                       
                       switch (filterDate) {
@@ -1591,8 +2319,14 @@ export default function UserDashboard() {
                       <div key={investment.id} className="bg-[#1A1A1A] p-3 rounded-lg">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-medium">R {investment.amount}</p>
-                            <p className="text-xs text-white/60">{investment.investment_type}</p>
+                            <p className="text-sm font-medium">R {investment.amount.toLocaleString()}</p>
+                            <p className="text-xs text-white/60">
+                              {investment.investment_type === 'j' ? 'Joint Investment' : 
+                               investment.investment_type === 'i' ? 'Individual Investment' : 
+                               investment.investment_type === 'fixed' ? 'Fixed Term' : 
+                               investment.investment_type === 'flexible' ? 'Flexible' : 
+                               investment.investment_type}
+                            </p>
                             <p className="text-xs text-white/60">
                               Status: <span className={`${
                                 investment.status === 'pending' ? 'text-orange-500' : 
@@ -1604,7 +2338,7 @@ export default function UserDashboard() {
                               </span>
                             </p>
                             <p className="text-xs text-white/40">
-                              Invested: {new Date(investment.created_at).toLocaleDateString()}
+                              Invested: {investment.createdAt ? new Date(investment.createdAt).toLocaleDateString() : 'N/A'}
                             </p>
                           </div>
                           <div className="flex gap-2">
@@ -1722,34 +2456,62 @@ export default function UserDashboard() {
 
         {/* Recent Activity */}
         <div className="mb-4">
-          <h3 className="text-sm font-medium text-white mb-3">Recent Loan Activity</h3>
+          <h3 className="text-sm font-medium text-white mb-3">Recent Activity</h3>
           <div className="space-y-2">
-            <div className="bg-[#1A1A1A] p-3 rounded-lg">
+            {recentActivities.length === 0 ? (
+              <div className="text-center text-white/60 py-4">No recent activities</div>
+            ) : (
+              recentActivities.map((activity) => (
+                <div key={activity.id} className="bg-[#1A1A1A] p-3 rounded-lg">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 bg-green-500/10 rounded-full flex items-center justify-center">
-                  <FileText className="h-4 w-4 text-green-400" />
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center ${
+                      activity.type === 'loan' ? 'bg-green-500/10' :
+                      activity.type === 'investment' ? 'bg-sky-500/10' :
+                      'bg-orange-500/10'
+                    }`}>
+                      {activity.type === 'loan' ? (
+                        <FileText className={`h-4 w-4 ${
+                          activity.status === 'approved' ? 'text-green-400' :
+                          activity.status === 'pending' ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`} />
+                      ) : activity.type === 'investment' ? (
+                        <TrendingUp className={`h-4 w-4 ${
+                          activity.status === 'active' ? 'text-sky-400' :
+                          activity.status === 'pending' ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`} />
+                      ) : (
+                        <Users className={`h-4 w-4 ${
+                          activity.status === 'verified' ? 'text-orange-400' :
+                          'text-yellow-400'
+                        }`} />
+                      )}
                 </div>
                 <div className="flex-1">
-                  <p className="text-xs font-medium text-white">Business</p>
-                  <p className="text-[10px] text-white/60">Approved • 2 hours ago</p>
+                      <p className="text-xs font-medium text-white">{activity.title}</p>
+                      <p className="text-[10px] text-white/60">
+                        {activity.status.charAt(0).toUpperCase() + activity.status.slice(1)} • {
+                          new Date(activity.timestamp).toLocaleString('en-US', {
+                            hour: 'numeric',
+                            minute: 'numeric',
+                            hour12: true
+                          })
+                        }
+                      </p>
                 </div>
-                <p className="text-green-400 text-xs font-medium">$4,200</p>
+                    <p className={`text-xs font-medium ${
+                      activity.type === 'loan' ? 'text-green-400' :
+                      activity.type === 'investment' ? 'text-sky-400' :
+                      'text-orange-400'
+                    }`}>
+                      R{activity.amount.toLocaleString()}
+                    </p>
               </div>
             </div>
-
-            <div className="bg-[#1A1A1A] p-3 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 bg-sky-500/10 rounded-full flex items-center justify-center">
-                  <Clock className="h-4 w-4 text-sky-400" />
+              ))
+            )}
                 </div>
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-white">Equipment</p>
-                  <p className="text-[10px] text-white/60">Pending • 5 hours ago</p>
-                </div>
-                <p className="text-sky-400 text-xs font-medium">$3,150</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -2280,66 +3042,24 @@ export default function UserDashboard() {
 
       {/* Investment Application Modal */}
       <Dialog open={isInvestmentModalOpen} onOpenChange={setIsInvestmentModalOpen}>
-        <DialogContent className="bg-[#111111] text-white border-white/10 max-w-md">
-          <div className="absolute right-4 top-4">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setIsInvestmentModalOpen(false)}
-              className="text-white/70 hover:text-white hover:bg-white/10"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-          <DialogHeader>
-            <DialogTitle className="text-lg font-medium flex items-center gap-2">
-              <div className="h-6 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
-              Step {investmentCurrentStep}/4
-            </DialogTitle>
-            <DialogDescription className="text-white/60 text-sm">
-              {investmentCurrentStep === 1 && "Personal Details"}
-              {investmentCurrentStep === 2 && "Banking Information"}
-              {investmentCurrentStep === 3 && "Investment Details"}
-              {investmentCurrentStep === 4 && "Payment Details"}
+        <DialogContent className="sm:max-w-[350px] bg-[#111111] text-white border-white/10">
+          <DialogHeader className="pb-2">
+            <DialogTitle className="text-base">New Investment</DialogTitle>
+            <DialogDescription className="text-xs text-white/60">
+              Fill in your investment details
             </DialogDescription>
           </DialogHeader>
 
-          {/* Step Progress Indicator */}
-          <div className="flex items-center justify-center gap-1 mb-4">
-            {[1, 2, 3, 4].map((step) => (
-              <div key={step} className="flex items-center gap-1">
-                <div
-                  className={`h-6 w-6 rounded-full flex items-center justify-center transition-all duration-300 ${
-                    step === investmentCurrentStep
-                      ? "bg-gradient-to-r from-green-400 to-sky-400 shadow-lg shadow-green-500/20"
-                      : step < investmentCurrentStep
-                      ? "bg-green-500/20 text-green-400"
-                      : "bg-white/5 text-white/40"
-                  }`}
-                >
-                  {step === 1 && <User className="h-3 w-3" />}
-                  {step === 2 && <Building2 className="h-3 w-3" />}
-                  {step === 3 && <TrendingUp className="h-3 w-3" />}
-                  {step === 4 && <CreditCard className="h-3 w-3" />}
-                </div>
-                {step < 4 && (
-                  <div className="w-8 h-0.5 bg-gradient-to-r from-green-400/20 to-sky-400/20"></div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Step Content */}
-          <div className="py-2">
-            {investmentCurrentStep === 1 && (
-              <div className="space-y-3">
+          <div className="py-1 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              {/* Personal Details */}
                 <div className="space-y-1">
                   <Label className="text-xs text-white/60">Full Name</Label>
                   <Input
                     placeholder="Enter your full name"
                     value={investmentFormData.fullName}
                     onChange={(e) => setInvestmentFormData({ ...investmentFormData, fullName: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                  className="bg-white/5 border-0 text-xs h-7 placeholder:text-white/40"
                   />
                 </div>
                 <div className="space-y-1">
@@ -2349,30 +3069,25 @@ export default function UserDashboard() {
                     placeholder="Enter your email"
                     value={investmentFormData.email}
                     onChange={(e) => setInvestmentFormData({ ...investmentFormData, email: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                  className="bg-white/5 border-0 text-xs h-7 placeholder:text-white/40"
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Phone Number</Label>
+                <Label className="text-xs text-white/60">Phone</Label>
                   <Input
-                    placeholder="Enter your phone number"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                  placeholder="Enter your phone"
+                  value={investmentFormData.phone}
+                  onChange={(e) => setInvestmentFormData({ ...investmentFormData, phone: e.target.value })}
+                  className="bg-white/5 border-0 text-xs h-7 placeholder:text-white/40"
                   />
                 </div>
-              </div>
-            )}
-
-            {currentStep === 2 && (
-              <div className="space-y-3">
                 <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Bank Name</Label>
+                <Label className="text-xs text-white/60">Bank</Label>
                   <Select
-                    value={formData.bankName}
-                    onValueChange={(value) => setFormData({ ...formData, bankName: value })}
+                  value={investmentFormData.bankName}
+                  onValueChange={(value) => setInvestmentFormData({ ...investmentFormData, bankName: value })}
                   >
-                    <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
+                  <SelectTrigger className="bg-white/5 border-0 text-xs h-7">
                       <SelectValue placeholder="Select Bank" />
                     </SelectTrigger>
                     <SelectContent className="bg-[#111111] border-white/10">
@@ -2387,20 +3102,20 @@ export default function UserDashboard() {
                 <div className="space-y-1">
                   <Label className="text-xs text-white/60">Account Number</Label>
                   <Input
-                    placeholder="Enter your account number"
-                    value={formData.accountNumber}
-                    onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                  placeholder="Enter account number"
+                  value={investmentFormData.accountNumber}
+                  onChange={(e) => setInvestmentFormData({ ...investmentFormData, accountNumber: e.target.value })}
+                  className="bg-white/5 border-0 text-xs h-7 placeholder:text-white/40"
                   />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-white/60">Account Type</Label>
                   <Select
-                    value={formData.accountType}
-                    onValueChange={(value) => setFormData({ ...formData, accountType: value })}
+                  value={investmentFormData.accountType}
+                  onValueChange={(value) => setInvestmentFormData({ ...investmentFormData, accountType: value })}
                   >
-                    <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
-                      <SelectValue placeholder="Select Account Type" />
+                  <SelectTrigger className="bg-white/5 border-0 text-xs h-7">
+                    <SelectValue placeholder="Select Type" />
                     </SelectTrigger>
                     <SelectContent className="bg-[#111111] border-white/10">
                       <SelectItem value="savings">Savings</SelectItem>
@@ -2409,42 +3124,38 @@ export default function UserDashboard() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-            )}
-
-            {currentStep === 3 && (
-              <div className="space-y-3">
                 <div className="space-y-1">
                   <Label className="text-xs text-white/60">Investment Type</Label>
                   <Select
-                    value={formData.investmentType}
-                    onValueChange={(value) => setFormData({ ...formData, investmentType: value })}
+                  value={investmentFormData.investmentType}
+                  onValueChange={(value) => setInvestmentFormData({ ...investmentFormData, investmentType: value })}
                   >
-                    <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
-                      <SelectValue placeholder="Select Investment Type" />
+                  <SelectTrigger className="bg-white/5 border-0 text-xs h-7">
+                    <SelectValue placeholder="Select Type" />
                     </SelectTrigger>
                     <SelectContent className="bg-[#111111] border-white/10">
-                      <SelectItem value="green_finance">Green Finance</SelectItem>
+                    <SelectItem value="fixed">Fixed Term</SelectItem>
+                    <SelectItem value="flexible">Flexible</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Investment Amount</Label>
+                <Label className="text-xs text-white/60">Amount</Label>
                   <Input
                     type="number"
-                    placeholder="Enter investment amount"
-                    value={formData.investmentAmount}
-                    onChange={(e) => setFormData({ ...formData, investmentAmount: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                  placeholder="Enter amount"
+                  value={investmentFormData.investmentAmount}
+                  onChange={(e) => setInvestmentFormData({ ...investmentFormData, investmentAmount: e.target.value })}
+                  className="bg-white/5 border-0 text-xs h-7 placeholder:text-white/40"
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Investment Term</Label>
+                <Label className="text-xs text-white/60">Term</Label>
                   <Select
-                    value={formData.investmentTerm}
-                    onValueChange={(value) => setFormData({ ...formData, investmentTerm: value })}
+                  value={investmentFormData.investmentTerm}
+                  onValueChange={(value) => setInvestmentFormData({ ...investmentFormData, investmentTerm: value })}
                   >
-                    <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
+                  <SelectTrigger className="bg-white/5 border-0 text-xs h-7">
                       <SelectValue placeholder="Select Term" />
                     </SelectTrigger>
                     <SelectContent className="bg-[#111111] border-white/10">
@@ -2455,52 +3166,47 @@ export default function UserDashboard() {
                   </Select>
                 </div>
               </div>
-            )}
 
-            {currentStep === 4 && (
-              <div className="space-y-3">
-                <div className="bg-white/5 rounded-lg p-4 text-center">
-                  <div className="text-green-400 text-lg font-medium mb-2">R {formData.investmentAmount}</div>
+            <div className="bg-white/5 rounded-lg p-2 text-center">
+              <div className="text-green-400 text-sm font-medium">R {investmentFormData.investmentAmount}</div>
                   <div className="text-xs text-white/60">Investment Amount</div>
                 </div>
+
                 <div className="space-y-1">
-                  <Label className="text-xs text-white/60">PayPal Email</Label>
+              <Label className="text-xs text-white/60">Proof of Payment</Label>
                   <Input
-                    type="email"
-                    placeholder="Enter your PayPal email"
-                    value={formData.paypalEmail}
-                    onChange={(e) => setFormData({ ...formData, paypalEmail: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
+                type="file"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    setInvestmentFormData({ ...investmentFormData, paymentProof: e.target.files[0] })
+                  }
+                }}
+                accept="image/*,.pdf"
+                className="bg-white/5 border-0 text-xs h-7 placeholder:text-white/40"
+              />
+              <p className="text-xs text-white/40">
+                Upload proof of your bank transfer
+              </p>
                 </div>
+
                 <div className="text-xs text-white/60 text-center">
-                  You will be redirected to PayPal to complete your payment
+              Please make a direct bank transfer and upload the proof
                 </div>
-              </div>
-            )}
           </div>
 
-          {/* Navigation Buttons */}
-          <div className="flex gap-2 mt-4">
+          {/* Submit Button */}
+          <div className="mt-2">
             <Button
-              variant="outline"
-              onClick={handlePreviousInvestmentStep}
-              disabled={currentStep === 1}
-              className="flex-1 border-0 bg-white/5 hover:bg-white/10 text-white text-sm h-9"
+              onClick={handleSubmitInvestment}
+              className="w-full bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-xs h-8"
+              disabled={isInvestmentSubmitting}
             >
-              Back
-            </Button>
-            <Button
-              onClick={currentStep === 4 ? handleSubmitInvestment : handleNextInvestmentStep}
-              className="flex-1 bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-sm h-9"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
+              {isInvestmentSubmitting ? (
                 <div className="flex items-center gap-2">
-                  <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                  <div className="h-3 w-3 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
                   <span>Processing...</span>
                 </div>
-              ) : currentStep === 4 ? "Pay with PayPal" : "Continue"}
+              ) : "Submit Investment"}
             </Button>
           </div>
         </DialogContent>
@@ -2560,7 +3266,7 @@ export default function UserDashboard() {
               <div>
                 <p className="text-sm text-white/60">Investment Date</p>
                 <p className="text-base font-medium">
-                  {new Date(selectedInvestment.created_at).toLocaleDateString()}
+                  {new Date(selectedInvestment.createdAt).toLocaleDateString()}
                 </p>
               </div>
             </div>
@@ -2586,7 +3292,7 @@ export default function UserDashboard() {
                   Status: <span className="text-sky-500">{selectedInvestment.status}</span>
                 </p>
                 <p className="text-xs text-white/40">
-                  Invested: {new Date(selectedInvestment.created_at).toLocaleDateString()}
+                  Invested: {new Date(selectedInvestment.createdAt).toLocaleDateString()}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
@@ -2627,7 +3333,7 @@ export default function UserDashboard() {
                   Status: <span className="text-orange-500">{selectedInvestment.status}</span>
                 </p>
                 <p className="text-xs text-white/40">
-                  Applied: {new Date(selectedInvestment.created_at).toLocaleDateString()}
+                  Applied: {new Date(selectedInvestment.createdAt).toLocaleDateString()}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
@@ -2736,10 +3442,14 @@ export default function UserDashboard() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleViewStokvelaDetails(stokvela)}
-                        className="bg-white/50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-800/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/50 transition-all duration-300"
+                        onClick={() => stokvela.is_member ? handleViewStokvelaDetails(stokvela) : handleJoinStokvela(stokvela)}
+                        className={`${
+                          stokvela.is_member 
+                            ? "bg-white/50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-800/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/50"
+                            : "bg-green-500 hover:bg-green-600 text-white border-green-600"
+                        } transition-all duration-300`}
                       >
-                        View Members
+                        {stokvela.is_member ? "View Members" : "Join Stokvela"}
                       </Button>
                     </div>
                   </div>
@@ -2886,6 +3596,12 @@ export default function UserDashboard() {
                                 )}
                               </p>
                               <p className="text-xs text-black/80">
+                                {member.email}
+                              </p>
+                              <p className="text-xs text-black/60">
+                                {member.cellphone_number}
+                              </p>
+                              <p className="text-xs text-black/80 mt-1">
                                 <span className="font-medium">Pay Day:</span> {member.receiving_date ? formatDateInWords(member.receiving_date) : "Not set"}
                               </p>
                               {member.position === 1 ? (
@@ -3146,408 +3862,104 @@ export default function UserDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Add Join Form Dialog */}
+      <Dialog open={isJoinFormOpen} onOpenChange={setIsJoinFormOpen}>
+        <DialogContent className="bg-gradient-to-br from-green-900/90 to-green-800/90 backdrop-blur-sm text-green-100 border-green-500/20 max-w-sm p-6 rounded-xl shadow-2xl">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">Join Stokvela Group</DialogTitle>
+            <DialogDescription className="text-green-300/80 text-sm">
+              Complete your details to join
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-4">
+            <div className="col-span-2">
+              <Label htmlFor="names" className="text-xs font-medium text-green-300/90">Full Name</Label>
+              <Input
+                id="names"
+                value={joinFormData.names}
+                onChange={(e) => setJoinFormData({ ...joinFormData, names: e.target.value })}
+                placeholder="Enter name"
+                className="bg-green-900/30 border-green-500/20 text-green-100 placeholder:text-green-500/40 h-9 text-sm"
+              />
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="email" className="text-xs font-medium text-green-300/90">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={joinFormData.email}
+                onChange={(e) => setJoinFormData({ ...joinFormData, email: e.target.value })}
+                placeholder="Enter email"
+                className="bg-green-900/30 border-green-500/20 text-green-100 placeholder:text-green-500/40 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label htmlFor="cellphone" className="text-xs font-medium text-green-300/90">Phone</Label>
+              <Input
+                id="cellphone"
+                value={joinFormData.cellphone_number}
+                onChange={(e) => setJoinFormData({ ...joinFormData, cellphone_number: e.target.value })}
+                placeholder="Cell number"
+                className="bg-green-900/30 border-green-500/20 text-green-100 placeholder:text-green-500/40 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label htmlFor="account_number" className="text-xs font-medium text-green-300/90">Account No.</Label>
+              <Input
+                id="account_number"
+                value={joinFormData.account_number}
+                onChange={(e) => setJoinFormData({ ...joinFormData, account_number: e.target.value })}
+                placeholder="Acc number"
+                className="bg-green-900/30 border-green-500/20 text-green-100 placeholder:text-green-500/40 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label htmlFor="account_name" className="text-xs font-medium text-green-300/90">Account Name</Label>
+              <Input
+                id="account_name"
+                value={joinFormData.account_name}
+                onChange={(e) => setJoinFormData({ ...joinFormData, account_name: e.target.value })}
+                placeholder="Acc name"
+                className="bg-green-900/30 border-green-500/20 text-green-100 placeholder:text-green-500/40 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label htmlFor="account_type" className="text-xs font-medium text-green-300/90">Account Type</Label>
+              <Select
+                value={joinFormData.account_type}
+                onValueChange={(value) => setJoinFormData({ ...joinFormData, account_type: value })}
+              >
+                <SelectTrigger className="bg-green-900/30 border-green-500/20 text-green-100 h-9 text-sm">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent className="bg-green-900/95 border-green-500/20">
+                  <SelectItem value="SAVINGS" className="text-green-100 hover:bg-green-800/50">Savings</SelectItem>
+                  <SelectItem value="CHEQUE" className="text-green-100 hover:bg-green-800/50">Cheque</SelectItem>
+                  <SelectItem value="CURRENT" className="text-green-100 hover:bg-green-800/50">Current</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsJoinFormOpen(false)}
+              className="bg-green-900/30 hover:bg-green-800/50 text-green-100 border-green-500/20 h-9 text-sm"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitJoinForm}
+              className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white h-9 text-sm"
+            >
+              Join Stokvela
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-
-  const handleSubmitInvestment = async () => {
-    try {
-      setIsSubmitting(true)
-      
-      // Validate final step
-      if (!validateInvestmentStep(4)) {
-        setIsSubmitting(false)
-        return
-      }
-
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) {
-        toast({
-          title: "Error",
-          description: "Please sign in to submit an investment",
-          variant: "destructive",
-        })
-        return
-      }
-
-      const { error } = await supabase
-        .from('investments')
-        .insert({
-          user_id: session.user.id,
-          amount: parseFloat(formData.investmentAmount),
-          investment_type: formData.investmentType,
-          term: parseInt(formData.investmentTerm),
-          expected_return: parseFloat(formData.investmentAmount) * 1.1, // 10% return
-          payment_method: 'paypal',
-          status: 'pending',
-          payment_status: 'pending',
-          paypal_email: formData.paypalEmail
-        })
-
-      if (error) throw error
-
-      // Show success message
-      toast({
-        title: "Investment Submitted Successfully!",
-        description: "Your investment has been received. Please complete the PayPal payment to activate your investment.",
-        variant: "default",
-        duration: 5000,
-      })
-
-      // Reset form and close modal after showing success message
-      setTimeout(() => {
-        setFormData({
-          fullName: "",
-          email: "",
-          phone: "",
-          address: "",
-          employmentStatus: "",
-          monthlyIncome: "",
-          loanAmount: "",
-          loanPurpose: "",
-          returnDate: "",
-          bankName: "",
-          accountNumber: "",
-          accountType: "",
-          bankStatement: null,
-          proofOfId: null,
-          employmentContract: null,
-          investmentType: "",
-          investmentAmount: "",
-          investmentTerm: "",
-          paypalEmail: ""
-        })
-        setCurrentStep(1)
-        setIsInvestmentModalOpen(false)
-      }, 1000)
-
-    } catch (error) {
-      console.error('Error submitting investment:', error)
-      toast({
-        title: "Error",
-        description: "Failed to submit investment. Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const handleWithdrawInvestment = async (investmentId: string) => {
-    try {
-      const { error } = await supabase
-        .from('investments')
-        .update({ 
-          status: 'withdrawn',
-          withdrawn_at: new Date().toISOString()
-        })
-        .eq('id', investmentId)
-
-      if (error) throw error
-
-      toast({
-        title: "Success",
-        description: "Investment withdrawn successfully",
-      })
-
-      setIsWithdrawConfirmOpen(false)
-      fetchUserInvestments()
-    } catch (error) {
-      console.error('Error withdrawing investment:', error)
-      toast({
-        title: "Error",
-        description: "Failed to withdraw investment",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleCancelInvestment = async (investmentId: string) => {
-    try {
-      const { error } = await supabase
-        .from('investments')
-        .update({ 
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString()
-        })
-        .eq('id', investmentId)
-
-      if (error) throw error
-
-      toast({
-        title: "Success",
-        description: "Investment cancelled successfully",
-      })
-
-      setIsCancelConfirmOpen(false)
-      fetchUserInvestments()
-    } catch (error) {
-      console.error('Error cancelling investment:', error)
-      toast({
-        title: "Error",
-        description: "Failed to cancel investment",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const validateInvestmentStep = (step: number) => {
-    switch (step) {
-      case 1:
-        if (!formData.fullName) {
-          toast({
-            title: "Missing Information",
-            description: "Please enter your full name",
-            variant: "destructive",
-          })
-          return false
-        }
-        if (!formData.email) {
-          toast({
-            title: "Missing Information",
-            description: "Please enter your email",
-            variant: "destructive",
-          })
-          return false
-        }
-        if (!formData.phone) {
-          toast({
-            title: "Missing Information",
-            description: "Please enter your phone number",
-            variant: "destructive",
-          })
-          return false
-        }
-        return true
-      case 2:
-        if (!formData.bankName) {
-          toast({
-            title: "Missing Information",
-            description: "Please select your bank",
-            variant: "destructive",
-          })
-          return false
-        }
-        if (!formData.accountNumber) {
-          toast({
-            title: "Missing Information",
-            description: "Please enter your account number",
-            variant: "destructive",
-          })
-          return false
-        }
-        if (!formData.accountType) {
-          toast({
-            title: "Missing Information",
-            description: "Please select your account type",
-            variant: "destructive",
-          })
-          return false
-        }
-        return true
-      case 3:
-        if (!formData.investmentType) {
-          toast({
-            title: "Missing Information",
-            description: "Please select investment type",
-            variant: "destructive",
-          })
-          return false
-        }
-        if (!formData.investmentAmount) {
-          toast({
-            title: "Missing Information",
-            description: "Please enter investment amount",
-            variant: "destructive",
-          })
-          return false
-        }
-        if (!formData.investmentTerm) {
-          toast({
-            title: "Missing Information",
-            description: "Please select investment term",
-            variant: "destructive",
-          })
-          return false
-        }
-        return true
-      case 4:
-        if (!formData.paypalEmail) {
-          toast({
-            title: "Missing Information",
-            description: "Please enter your PayPal email",
-            variant: "destructive",
-          })
-          return false
-        }
-        return true
-      default:
-        return true
-    }
-  }
-
-  const handleNextInvestmentStep = () => {
-    setInvestmentCurrentStep((prev) => Math.min(prev + 1, 4))
-  }
-
-  const handlePreviousInvestmentStep = () => {
-    setInvestmentCurrentStep((prev) => Math.max(prev - 1, 1))
-  }
-
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(word => word[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2)
-  }
-
-  const formatDateInWords = (dateString: string) => {
-    const date = new Date(dateString);
-    const day = date.getDate();
-    const month = date.toLocaleString('default', { month: 'long' });
-    const year = date.getFullYear();
-    
-    // Add ordinal suffix to day
-    const ordinalSuffix = (day: number) => {
-      if (day > 3 && day < 21) return 'th';
-      switch (day % 10) {
-        case 1: return 'st';
-        case 2: return 'nd';
-        case 3: return 'rd';
-        default: return 'th';
-      }
-    };
-    
-    return `${day}${ordinalSuffix(day)} of ${month} ${year}`;
-  };
-
-  const handleViewMemberDetails = (member: any) => {
-    console.log('Viewing member details:', member);
-    setSelectedMember(member);
-    setIsMemberDetailsOpen(true);
-    console.log('Dialog state:', { isMemberDetailsOpen: true, selectedMember: member });
-  };
-
-  const handlePayNow = (member: any) => {
-    try {
-      // First set the member
-      setSelectedMemberForPayment(member);
-      
-      // Then reset the form
-      setPaymentStep(1);
-      setPaymentAmount("");
-      setPaymentSignature("");
-      setPaymentProof(null);
-      
-      // Finally open the dialog
-      setIsPaymentDialogOpen(true);
-      
-      console.log('Payment dialog opened for member:', member);
-    } catch (error) {
-      console.error('Error opening payment dialog:', error);
-      toast({
-        title: "Error",
-        description: "Failed to open payment dialog. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handlePaymentProofChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setPaymentProof(e.target.files[0])
-    }
-  }
-
-  const handleSubmitPayment = async () => {
-    if (!selectedMemberForPayment || !paymentAmount || !paymentSignature || !paymentProof) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmittingPayment(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) {
-        toast({
-          title: "Error",
-          description: "You must be logged in to make a payment",
-          variant: "destructive",
-        })
-        return
-      }
-
-      // Upload proof of payment to storage
-      const fileExt = paymentProof.name.split('.').pop()
-      const fileName = `${session.user.id}_${selectedMemberForPayment.id}_${Date.now()}.${fileExt}`
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(`payment_proofs/${fileName}`, paymentProof)
-
-      if (uploadError) throw uploadError
-
-      // Get the public URL for the uploaded file
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(`payment_proofs/${fileName}`)
-
-      // Record the payment in the database
-      const { error: paymentError } = await supabase
-        .from('stokvela_payments')
-        .insert({
-          user_id: session.user.id,
-          member_id: selectedMemberForPayment.id,
-          group_id: selectedMemberForPayment.group_id,
-          amount: parseFloat(paymentAmount),
-          signature: paymentSignature,
-          proof_url: publicUrl,
-          status: 'pending',
-          payment_date: new Date().toISOString()
-        })
-
-      if (paymentError) throw paymentError
-
-      toast({
-        title: "Payment Submitted",
-        description: "Your payment has been submitted successfully",
-      })
-
-      // Close the dialog and reset state
-      setIsPaymentDialogOpen(false)
-      setSelectedMemberForPayment(null)
-      setPaymentAmount("")
-      setPaymentSignature("")
-      setPaymentProof(null)
-      setPaymentStep(1)
-
-    } catch (error) {
-      console.error('Error submitting payment:', error)
-      toast({
-        title: "Error",
-        description: "Failed to submit payment. Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmittingPayment(false)
-    }
-  }
-
-  const handleNextPaymentStep = () => {
-    if (paymentStep < 3) {
-      setPaymentStep(paymentStep + 1)
-    }
-  }
-
-  const handlePreviousPaymentStep = () => {
-    if (paymentStep > 1) {
-      setPaymentStep(paymentStep - 1)
-    }
-  }
 
 

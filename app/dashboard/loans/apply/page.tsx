@@ -235,6 +235,7 @@ export default function LoanApplicationPage() {
                         <FormItem>
                           <FormLabel>Loan Type</FormLabel>
                           <Select
+                            value={field.value}
                             onValueChange={(value) => {
                               field.onChange(value)
                               const selected = loanTypes.find((type) => type.id === value)
@@ -242,19 +243,15 @@ export default function LoanApplicationPage() {
                                 setSelectedLoanType(selected)
                               }
                             }}
-                            defaultValue={field.value}
                           >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select a loan type" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {loanTypes.map((type) => (
-                                <SelectItem key={type.id} value={type.id}>
-                                  {type.name}
-                                </SelectItem>
-                              ))}
+                            <SelectTrigger className="w-full bg-white/5 border-white/10 text-white">
+                              <SelectValue placeholder="Select loan type" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-gray-900 border-white/10">
+                              <SelectItem value="personal" className="text-white hover:bg-white/10">Personal Loan</SelectItem>
+                              <SelectItem value="business" className="text-white hover:bg-white/10">Business Loan</SelectItem>
+                              <SelectItem value="education" className="text-white hover:bg-white/10">Education Loan</SelectItem>
+                              <SelectItem value="home" className="text-white hover:bg-white/10">Home Loan</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormDescription>{selectedLoanType?.description}</FormDescription>
