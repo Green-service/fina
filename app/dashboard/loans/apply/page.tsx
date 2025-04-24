@@ -246,7 +246,7 @@ export default function LoanApplicationPage() {
                           >
                             <SelectTrigger className="w-full bg-white/5 border-white/10 text-white">
                               <SelectValue placeholder="Select loan type" />
-                            </SelectTrigger>
+                              </SelectTrigger>
                             <SelectContent className="bg-gray-900 border-white/10">
                               <SelectItem value="personal" className="text-white hover:bg-white/10">Personal Loan</SelectItem>
                               <SelectItem value="business" className="text-white hover:bg-white/10">Business Loan</SelectItem>

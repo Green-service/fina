@@ -1723,7 +1723,7 @@ export default function UserDashboard() {
       const fileExt = paymentProof.name.split('.').pop()
       const fileName = `${session.user.id}_${selectedMemberForPayment.id}_${Date.now()}.${fileExt}`
       const { error: uploadError } = await supabaseRef.current.storage
-        .from('ducuments')
+        .from('ducuments')  // This is the old bucket name
         .upload(`payment_proofs/${fileName}`, paymentProof)
 
       if (uploadError) {
@@ -1733,7 +1733,7 @@ export default function UserDashboard() {
 
       // Get the public URL for the uploaded file
       const { data: { publicUrl } } = supabaseRef.current.storage
-        .from('ducuments')
+        .from('ducuments')  // This is the old bucket name
         .getPublicUrl(`payment_proofs/${fileName}`)
 
       // Get the position 1 member of the stokvela group
@@ -1800,46 +1800,17 @@ export default function UserDashboard() {
         throw new Error('Failed to update receiver amount')
       }
 
-      // Update member's payment status
-      const { error: updateError } = await supabaseRef.current
-        .from('stokvela_members')
-        .update({ 
-          payment_status: 'paid',
-          payment_date: new Date().toISOString(),
-          payment_proof_url: publicUrl
-        })
-        .eq('id', selectedMemberForPayment.id)
-
-      if (updateError) {
-        console.error('Error updating payment status:', updateError)
-        throw new Error('Failed to update payment status')
-      }
-
-      // Show loading state
       toast({
-        title: "Processing Payment",
-        description: "Please wait while we process your payment...",
-        variant: "default",
-        duration: 3000,
+        title: "Success",
+        description: "Payment submitted successfully",
       })
 
-      // Wait for 3 seconds
-      await new Promise(resolve => setTimeout(resolve, 3000))
-
-      // Show success message
-      toast({
-        title: "Payment Successful!",
-        description: "Your payment has been successfully processed and recorded.",
-        variant: "default",
-        duration: 5000,
-        isClosable: true,
-      })
-
-      // Reset form and close modal
+      // Reset form and close dialog
+      setPaymentAmount('')
+      setPaymentSignature('')
       setPaymentProof(null)
-      setSelectedMemberForPayment(null)
-      setPaymentStep(1)
       setIsPaymentDialogOpen(false)
+      setSelectedMemberForPayment(null)
 
       // Refresh the stokvela details
       if (selectedStokvela) {
@@ -2104,6 +2075,15 @@ export default function UserDashboard() {
                 <div className="text-red-500 font-medium">{loanStats.rejected}</div>
                 <div className="text-xs text-white/60">Rejected</div>
               </div>
+            </div>
+
+            <div className="flex justify-center mt-4">
+              <Button 
+                onClick={() => setShowAllLoans(!showAllLoans)}
+                className="bg-orange-500 hover:bg-orange-600 text-white"
+              >
+                {showAllLoans ? 'Hide Loans' : 'View All Loans'}
+              </Button>
             </div>
 
             {/* Loans List */}

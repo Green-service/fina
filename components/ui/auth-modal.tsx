@@ -203,7 +203,8 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
           data: {
             full_name: values.fullName,
             phone: values.phone
-          }
+          },
+          emailRedirectTo: `${window.location.origin}/auth/callback`
         }
       })
 
@@ -216,55 +217,31 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
         throw new Error("Failed to create account")
       }
 
-      // Insert user data into users_account table
-      const { data: userData, error: insertError } = await supabase
-        .from("users_account")
-        .insert([
-          {
-            auth_id: authData.user.id,
+      // Store pending user data for later use
+      setPendingUserData({
         email: values.email,
-            full_name: values.fullName,
-            phone: values.phone,
-            password_hash: "**********", // For reference only
-            is_verified: true,
-            created_at: new Date().toISOString(),
-            user_role: "user" // Default role for new users
-          },
-        ])
-        .select()
-        .single()
-
-      if (insertError) {
-        console.error("Error inserting user data:", insertError)
-        throw insertError
-      }
-
-      // Create user object
-      const user = {
-        id: authData.user.id,
-        email: authData.user.email,
-        user_metadata: {
-          full_name: values.fullName,
-          phone: values.phone
-        }
-      }
-
-      // Set user in our custom auth state manager
-      authState.setUser(user)
-      authState.setUserRole("user")
-
-      // Show success view
-      setView("success")
-
-      toast({
-        title: "Account created",
-        description: "Your account has been successfully created.",
+        full_name: values.fullName,
+        phone: values.phone,
+        password: values.password
       })
+      setPendingEmail(values.email)
+
+      // Show verification view immediately
+      setView("verification")
+      
+      // Start the resend timer
+      setTimeLeft(300) // 5 minutes
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+      }
+      timerRef.current = setTimeout(() => {
+        setTimeLeft(0)
+      }, 300000) // 5 minutes in milliseconds
+
     } catch (error: any) {
-      console.error('Sign up error:', error)
       toast({
-        title: "Error",
-        description: error.message || "Failed to create account.",
+        title: "Sign up failed",
+        description: error.message || "Failed to create account",
         variant: "destructive",
       })
     } finally {
@@ -301,8 +278,10 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
             full_name: pendingUserData.full_name,
             phone: pendingUserData.phone,
             password_hash: "**********", // For reference only, actual auth is handled by Supabase
+            user_role: "1", // Set role to "1" instead of "user"
             is_verified: true,
             created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
           },
         ])
 
@@ -311,23 +290,10 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
           throw insertError
         }
 
-        // Create user role entry
-        const { error: roleError } = await supabase.from("ser_role").insert([
-          {
-            user_id: authId,
-            role: "user", // Default role for new users
-          },
-        ])
-
-        if (roleError) {
-          console.error("Error creating user role:", roleError)
-          throw roleError
-        }
-        
         // Set user in our custom auth state manager
         if (userData.user) {
           authState.setUser(userData.user)
-          authState.setUserRole("user")
+          authState.setUserRole("1")
         }
       }
 
@@ -338,7 +304,14 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
       if (timerRef.current) {
         clearTimeout(timerRef.current)
       }
+
+      toast({
+        title: "Verification successful",
+        description: "Your account has been verified successfully",
+      })
+
     } catch (error: any) {
+      console.error("Verification error:", error)
       toast({
         title: "Verification failed",
         description: error.message || "Invalid or expired verification code",
@@ -359,26 +332,32 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
         email: pendingEmail,
         password: pendingUserData.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             full_name: pendingUserData.full_name,
-            phone: pendingUserData.phone,
-          },
-        },
+            phone: pendingUserData.phone
+          }
+        }
       })
 
       if (error) throw error
 
       // Reset timer
-      setTimeLeft(300)
+      setTimeLeft(300) // 5 minutes
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+      }
+      timerRef.current = setTimeout(() => {
+        setTimeLeft(0)
+      }, 300000) // 5 minutes in milliseconds
 
       toast({
         title: "Verification code resent",
-        description: "Please check your email for a new verification code",
+        description: "Please check your email for the new 6-digit verification code",
       })
+
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: "Failed to resend code",
         description: error.message || "Failed to resend verification code",
         variant: "destructive",
       })
