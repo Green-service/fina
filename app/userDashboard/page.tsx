@@ -122,6 +122,7 @@ interface StokvelaJoinForm {
   account_number: string;
   account_name: string;
   account_type: string;
+  terms_accepted: boolean;
 }
 
 export default function UserDashboard() {
@@ -220,11 +221,14 @@ export default function UserDashboard() {
     cellphone_number: '',
     account_number: '',
     account_name: '',
-    account_type: ''
+    account_type: '',
+    terms_accepted: false
   });
 
   const [isJoinFormOpen, setIsJoinFormOpen] = useState(false);
   const [selectedStokvelaForJoin, setSelectedStokvelaForJoin] = useState<any>(null);
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
+  const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
 
   // Initialize Supabase client
   useEffect(() => {
@@ -1847,6 +1851,12 @@ export default function UserDashboard() {
   // Add new function to handle joining stokvela
   const handleJoinStokvela = (stokvela: any) => {
     setSelectedStokvelaForJoin(stokvela);
+    setIsTermsModalOpen(true);
+  };
+
+  const handleAcceptTerms = () => {
+    setHasAcceptedTerms(true);
+    setIsTermsModalOpen(false);
     setIsJoinFormOpen(true);
   };
 
@@ -1906,9 +1916,19 @@ export default function UserDashboard() {
 
       if (error) throw error;
 
+      // Update the local state to reflect that the user is now a member
+      const updatedStokvelas = userStokvelas.map(stokvela => {
+        if (stokvela.id === selectedStokvelaForJoin.id) {
+          return { ...stokvela, is_member: true };
+        }
+        return stokvela;
+      });
+      setUserStokvelas(updatedStokvelas);
+
       toast({
-        title: "Success",
-        description: "You have successfully joined the stokvela group",
+        title: "Successfully Joined!",
+        description: "Your application has been submitted. Please wait for verification from the group administrator. You will be notified once your membership is approved.",
+        duration: 5000,
       });
 
       // Reset form and close dialog
@@ -1918,19 +1938,20 @@ export default function UserDashboard() {
         cellphone_number: '',
         account_number: '',
         account_name: '',
-        account_type: ''
+        account_type: '',
+        terms_accepted: false
       });
       setIsJoinFormOpen(false);
       setSelectedStokvelaForJoin(null);
 
-      // Refresh the stokvelas list by calling the function from the parent scope
-      const { data: updatedStokvelas } = await supabaseRef.current
+      // Refresh the stokvelas list from the database
+      const { data: refreshedStokvelas } = await supabaseRef.current
         .from('stokvela_groups')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (updatedStokvelas) {
-        setUserStokvelas(updatedStokvelas);
+      if (refreshedStokvelas) {
+        setUserStokvelas(refreshedStokvelas);
       }
     } catch (error) {
       console.error('Error joining stokvela:', error);
@@ -3934,6 +3955,66 @@ export default function UserDashboard() {
               className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white h-9 text-sm"
             >
               Join Stokvela
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Terms and Conditions Modal */}
+      <Dialog open={isTermsModalOpen} onOpenChange={setIsTermsModalOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Terms and Conditions for Joining Stokvela</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-4 py-4">
+            <div className="space-y-4 text-sm">
+              <p className="font-semibold">1. Eligibility Requirements</p>
+              <ul className="list-disc pl-6 space-y-2">
+                <li>You must be employed or have a verifiable source of income</li>
+                <li>You must be at least 18 years old</li>
+                <li>You must have a valid bank account</li>
+                <li>You must provide accurate personal and financial information</li>
+              </ul>
+
+              <p className="font-semibold">2. Payment Obligations</p>
+              <ul className="list-disc pl-6 space-y-2">
+                <li>You agree to make timely payments as per the stokvela schedule</li>
+                <li>Late payments may result in penalties or exclusion from the stokvela</li>
+                <li>You must maintain sufficient funds in your account for scheduled payments</li>
+                <li>You understand that consistent late payments may affect your future participation</li>
+              </ul>
+
+              <p className="font-semibold">3. Verification Process</p>
+              <ul className="list-disc pl-6 space-y-2">
+                <li>We will verify your employment and income status</li>
+                <li>You must provide necessary documentation for verification</li>
+                <li>Your bank account details will be verified</li>
+                <li>Additional verification may be required at our discretion</li>
+              </ul>
+
+              <p className="font-semibold">4. Community Guidelines</p>
+              <ul className="list-disc pl-6 space-y-2">
+                <li>You agree to treat all members with respect</li>
+                <li>You will maintain confidentiality of other members' information</li>
+                <li>You will participate actively in the stokvela community</li>
+                <li>You understand that disruptive behavior may result in removal from the stokvela</li>
+              </ul>
+
+              <p className="font-semibold">5. Financial Responsibility</p>
+              <ul className="list-disc pl-6 space-y-2">
+                <li>You understand the commitment of regular payments</li>
+                <li>You acknowledge the importance of financial planning for payments</li>
+                <li>You will notify the group in advance if you anticipate payment difficulties</li>
+                <li>You understand that the stokvela is a financial commitment</li>
+              </ul>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTermsModalOpen(false)}>
+              Decline
+            </Button>
+            <Button onClick={handleAcceptTerms}>
+              Accept Terms and Continue
             </Button>
           </DialogFooter>
         </DialogContent>

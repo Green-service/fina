@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
+import { authState } from '@/lib/auth-state'
 
 export default function AuthCallbackPage() {
   const router = useRouter()
@@ -64,12 +65,20 @@ export default function AuthCallbackPage() {
 
           console.log('New user account created successfully')
           
+          // Set user in auth state
+          authState.setUser(session.user)
+          authState.setUserRole('1')
+          
           // Redirect to user dashboard for new users
           router.push('/userDashboard')
           return
         }
 
         console.log('User role fetched successfully:', userData.user_role)
+
+        // Set user in auth state
+        authState.setUser(session.user)
+        authState.setUserRole(userData.user_role)
 
         // Redirect based on user role
         if (userData.user_role === '2') {
