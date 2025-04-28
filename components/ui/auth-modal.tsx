@@ -228,7 +228,7 @@ export function AuthModal({ isOpen, onClose, initialView = "signIn" }: AuthModal
 
       // Show verification view immediately
       setView("verification")
-      
+
       // Start the resend timer
       setTimeLeft(300) // 5 minutes
       if (timerRef.current) {

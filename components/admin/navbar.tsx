@@ -51,9 +51,9 @@ export function AdminNavbar() {
     <>
       <div className="fixed z-50 top-5 left-0 right-0 flex justify-center pointer-events-none pl-[4.5rem] lg:pl-[17rem] pr-4">
         <div className="pointer-events-auto w-full max-w-2xl mx-auto">
-          <div className="flex items-center justify-between gap-2 bg-gradient-to-r from-green-500 to-green-600 py-1 px-2 rounded-full shadow-[0_8px_32px_0_rgba(34,197,94,0.3)] border border-green-400/20 backdrop-blur-md relative overflow-hidden">
+          <div className="flex items-center justify-between gap-2 bg-gradient-to-r from-sky-300/60 via-green-200/60 to-green-400/40 py-1 px-2 rounded-full shadow-[0_8px_32px_0_rgba(34,197,94,0.15)] border border-white/20 backdrop-blur-xl relative overflow-hidden">
             <div className="absolute inset-0 bg-[url('/images/noise.png')] opacity-10"></div>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-white/10 to-transparent"></div>
             <Link href="/adminDashboard" className="flex-shrink-0 relative">
               {Logo}
             </Link>

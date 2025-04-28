@@ -19,9 +19,10 @@ import { Button } from "@/components/ui/button"
 
 interface SidebarProps {
   onSignOut: () => void
+  onUserManagementClick?: () => void
 }
 
-export function AdminSidebar({ onSignOut }: SidebarProps) {
+export function AdminSidebar({ onSignOut, onUserManagementClick }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(true)
   const pathname = usePathname()
 
@@ -38,8 +39,9 @@ export function AdminSidebar({ onSignOut }: SidebarProps) {
     },
     {
       name: "User Management",
-      href: "/adminDashboard/users",
+      href: "#",
       icon: UsersIcon,
+      onClick: onUserManagementClick,
     },
     {
       name: "Stokvela Groups",
@@ -81,6 +83,12 @@ export function AdminSidebar({ onSignOut }: SidebarProps) {
             <Link
               key={item.name}
               href={item.href}
+              onClick={(e) => {
+                if (item.onClick) {
+                  e.preventDefault()
+                  item.onClick()
+                }
+              }}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 isActive

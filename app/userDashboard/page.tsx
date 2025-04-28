@@ -32,7 +32,7 @@ import { useAuth } from "@/contexts/auth-context"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Loader2 } from "lucide-react"
+import { Loader2, Check } from "lucide-react"
 import { authState } from '@/lib/auth-state'
 import emailjs from '@emailjs/browser'
 import LoanHistoryLimits from '@/components/LoanHistoryLimits'
@@ -73,11 +73,9 @@ interface FormData {
   bankName: string
   accountNumber: string
   accountType: string
+  bankStatement: File | null
+  proofOfId: File | null
   employmentContract: File | null
-  investmentType: string
-  investmentAmount: string
-  investmentTerm: string
-  paypalEmail: string
 }
 
 interface InvestmentFormData {
@@ -133,6 +131,10 @@ export default function UserDashboard() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isLoanModalOpen, setIsLoanModalOpen] = useState(false)
+  const [isLoanSuccessDialogOpen, setIsLoanSuccessDialogOpen] = useState(false)
+  const [isLoanTermsDialogOpen, setIsLoanTermsDialogOpen] = useState(false)
+  const [isTermsDialogOpen, setIsTermsDialogOpen] = useState(false)
+  const [termsAccepted, setTermsAccepted] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -176,11 +178,9 @@ export default function UserDashboard() {
     bankName: '',
     accountNumber: '',
     accountType: '',
+    bankStatement: null,
+    proofOfId: null,
     employmentContract: null,
-    investmentType: '',
-    investmentAmount: '',
-    investmentTerm: '',
-    paypalEmail: ''
   })
 
   const [investmentFormData, setInvestmentFormData] = useState<InvestmentFormData>({
@@ -229,6 +229,14 @@ export default function UserDashboard() {
   const [selectedStokvelaForJoin, setSelectedStokvelaForJoin] = useState<any>(null);
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
+
+  // Add state for loan summary
+  const [loanSummary, setLoanSummary] = useState({
+    amount: 0,
+    interest: 0,
+    total: 0,
+    interestRate: 0
+  })
 
   // Initialize Supabase client
   useEffect(() => {
@@ -638,253 +646,239 @@ export default function UserDashboard() {
   // Helper function to upload file
   const uploadFile = async (file: File, folder: string, userId: string) => {
     try {
-      const timestamp = Date.now()
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const filePath = `${userId}/${folder}/${timestamp}-${cleanFileName}`
-      
-      // Upload file to existing bucket with better error handling
-      const { error: uploadError, data } = await supabaseRef.current.storage
-        .from('ducuments')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true,
-          contentType: file.type
-        })
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${folder}/${userId}/${Date.now()}.${fileExt}`
 
-      if (uploadError) {
-        console.error(`Upload error details:`, uploadError)
-        
-        // Handle specific error cases
-        if (uploadError.message.includes('Permission denied') || uploadError.message.includes('not authorized')) {
-          throw new Error('Permission denied. Please check if you are properly signed in.')
-        } else if (uploadError.message.includes('Invalid') || uploadError.message.includes('Bad Request')) {
-          throw new Error('Invalid file or upload request. Please try again.')
-        } else {
-          throw new Error(`Failed to upload ${folder}: ${uploadError.message}`)
-        }
-      }
+      const { error: uploadError } = await supabaseRef.current.storage
+        .from('documents')
+        .upload(fileName, file)
 
-      // Get the public URL for the file
-      const { data: { publicUrl } } = supabaseRef.current
-        .storage
-        .from('ducuments')
-        .getPublicUrl(filePath)
+      if (uploadError) throw uploadError
 
-      return filePath
+      const { data: { publicUrl } } = supabaseRef.current.storage
+        .from('documents')
+        .getPublicUrl(fileName)
+
+      return publicUrl
     } catch (error) {
-      console.error(`Error in uploadFile:`, error)
+      console.error('Error uploading file:', error)
       throw error
     }
+  }
+
+  const calculateReturnAmount = (amount: string) => {
+    const loanAmount = parseFloat(amount)
+    if (isNaN(loanAmount)) return 0
+
+    // Calculate interest based on loan amount
+    const interestRate = loanAmount < 1000 ? 0.5 : 0.4 // 50% for < 1000, 40% for >= 1000
+    const interest = loanAmount * interestRate
+    return loanAmount + interest
+  }
+
+  // Update loan summary when amount changes
+  const handleLoanAmountChange = (amount: string) => {
+    const loanAmount = parseFloat(amount) || 0
+    const interestRate = loanAmount < 1000 ? 0.5 : 0.4
+    const interest = loanAmount * interestRate
+    const total = loanAmount + interest
+
+    setLoanSummary({
+      amount: loanAmount,
+      interest: interest,
+      total: total,
+      interestRate: interestRate * 100
+    })
+
+    setFormData({ ...formData, loanAmount: amount })
   }
 
   const handleSubmitLoan = async () => {
     try {
       setIsSubmitting(true)
-      
-      // Validate final step
-      if (!validateStep(4)) {
-        setIsSubmitting(false)
-        return
+      const userId = authState.getUserId()
+      if (!userId) {
+        throw new Error('User not authenticated')
       }
 
-      const { data: { session } } = await supabaseRef.current.auth.getSession()
-      if (!session?.user) {
-        toast({
-          title: "Error",
-          description: "You must be logged in to submit a loan application",
-          variant: "destructive",
-        })
-        return
+      // Show terms dialog first
+      setIsLoanTermsDialogOpen(true)
+      return
+    } catch (error) {
+      console.error('Error:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleAcceptLoanTerms = async () => {
+    setIsLoanTermsDialogOpen(false)
+    try {
+      setIsSubmitting(true)
+      const userId = authState.getUserId()
+      if (!userId) {
+        throw new Error('User not authenticated')
       }
 
-      const userId = session.user.id
-      const documentUrls: { [key: string]: string } = {}
+      // Upload documents
+      const documentUrls = {
+        bank_statement_url: null,
+        id_document_url: null,
+        employment_contract_url: null
+      }
 
-      // Upload bank statement
       if (formData.bankStatement) {
-        try {
-          const path = await uploadFile(formData.bankStatement, 'bank-statements', userId)
-          documentUrls.bank_statement_url = path
-        } catch (error) {
-          console.error('Error uploading bank statement:', error)
-          toast({
-            title: "Error",
-            description: "Failed to upload bank statement. Please try again.",
-            variant: "destructive",
-          })
-          setIsSubmitting(false)
-          return
-        }
+        const { data: bankStatementData, error: bankStatementError } = await supabaseRef.current
+          .storage
+          .from('documents')  // Fixed typo from 'ducuments' to 'documents'
+          .upload(`${userId}/bank_statement_${Date.now()}.pdf`, formData.bankStatement)
+
+        if (bankStatementError) throw bankStatementError
+        documentUrls.bank_statement_url = bankStatementData.path
       }
 
-      // Upload ID document
       if (formData.proofOfId) {
-        try {
-          const path = await uploadFile(formData.proofOfId, 'id-documents', userId)
-          documentUrls.id_document_url = path
-        } catch (error) {
-          console.error('Error uploading ID document:', error)
-          toast({
-            title: "Error",
-            description: "Failed to upload ID document. Please try again.",
-            variant: "destructive",
-          })
-          setIsSubmitting(false)
-          return
-        }
+        const { data: idDocumentData, error: idDocumentError } = await supabaseRef.current
+          .storage
+          .from('documents')  // Fixed typo from 'ducuments' to 'documents'
+          .upload(`${userId}/id_document_${Date.now()}.pdf`, formData.proofOfId)
+
+        if (idDocumentError) throw idDocumentError
+        documentUrls.id_document_url = idDocumentData.path
       }
+
+      if (formData.employmentContract) {
+        const { data: employmentContractData, error: employmentContractError } = await supabaseRef.current
+          .storage
+          .from('documents')  // Fixed typo from 'ducuments' to 'documents'
+          .upload(`${userId}/employment_contract_${Date.now()}.pdf`, formData.employmentContract)
+
+        if (employmentContractError) throw employmentContractError
+        documentUrls.employment_contract_url = employmentContractData.path
+      }
+
+      // Calculate returning amount
+      const loanAmount = parseFloat(formData.loanAmount)
+      const interestRate = loanAmount < 1000 ? 0.4999 : 0.3999
+      const returningAmount = loanAmount * (1 + interestRate)
 
       // Create loan application
-      try {
-      // Calculate returning amount (40% interest)
-      const returningAmount = parseFloat(formData.loanAmount) * 1.4
-
-        // Calculate term in months (assuming returnDate is in format YYYY-MM-DD)
-        const returnDate = new Date(formData.returnDate)
-        const today = new Date()
-        const monthsDiff = (returnDate.getFullYear() - today.getFullYear()) * 12 + 
-                          (returnDate.getMonth() - today.getMonth())
-        const termInMonths = Math.max(1, monthsDiff) // Ensure at least 1 month
-
-        const { error } = await supabaseRef.current
-        .from('loan_applications')
+      const { error } = await supabaseRef.current
+        .from('loan_applications')  // Changed from 'loans' to 'loan_applications'
         .insert({
-            user_id: userId,
-          amount: parseFloat(formData.loanAmount),
+          user_id: userId,
+          amount: loanAmount,
+          term: 3, // Default to 3 months if not specified
           purpose: formData.loanPurpose,
-            term: termInMonths, // Use calculated months instead of date string
-            returning_date: formData.returnDate,
-            bank_statement_url: documentUrls.bank_statement_url,
-            id_document_url: documentUrls.id_document_url,
           status: 'pending',
+          bank_statement_url: documentUrls.bank_statement_url,
+          id_document_url: documentUrls.id_document_url,
+          contract_url: documentUrls.employment_contract_url,
+          additional_documents: {},
+          ai_recommendation: 'pending',
+          ai_risk_score: 0,
+          rejection_reason: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          returning_amount: returningAmount,
+          full_names: formData.fullName,
           employment_status: formData.employmentStatus,
           monthly_income: parseFloat(formData.monthlyIncome),
-            returning_amount: returningAmount,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          returning_date: formData.returnDate,
+          account_number: formData.accountNumber,
+          doubled_interests: false,
+          email: formData.email,
+          cellphone_number: formData.phone,
+          ai_risk_factors: '',
+          bank_name: formData.bankName
         })
 
-        if (error) {
-          console.error('Database error:', error)
-          throw new Error(`Database error: ${error.message}`)
-        }
-
-        // Send confirmation email using EmailJS
-        try {
-          // Initialize EmailJS with your public key
-          emailjs.init("xC1QMlEUFiMQaCmHA")
-          
-          // Format the return date for display
-          const formattedReturnDate = new Date(formData.returnDate).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-          })
-          
-          // Get the user's email directly from the session
-          const { data: { session } } = await supabaseRef.current.auth.getSession()
-          if (!session?.user) {
-            throw new Error("User session not found")
-          }
-          
-          const userEmail = session.user.email
-          const userName = session.user.user_metadata?.full_name || "Valued Customer"
-          
-          // Send the email
-          await emailjs.send(
-            "service_auuykij", // Service ID
-            "template_3ns00mj", // Template ID
-            {
-              to_name: userName,
-              to_email: userEmail,
-              message: `Thank you for applying for a loan with GreenFina. Your application has been received and is currently under review. We will notify you once a decision has been made.`,
-              loan_amount: parseFloat(formData.loanAmount).toLocaleString(),
-              total_amount: returningAmount.toLocaleString(),
-              due_date: formattedReturnDate,
-            },
-            "xC1QMlEUFiMQaCmHA" // Public Key
-          )
-          
-          console.log("Confirmation email sent successfully to:", userEmail)
-          
-          // Show success dialog
-          setUserEmail(userEmail)
-          setShowSuccessDialog(true)
-          
-          // Wait for 3 seconds before closing the modal and resetting the form
-          setTimeout(() => {
-            setFormData({
-              fullName: '',
-              email: '',
-              phone: '',
-              address: '',
-              employmentStatus: '',
-              monthlyIncome: '',
-              loanAmount: '',
-              loanPurpose: '',
-              returnDate: '',
-              bankName: '',
-              accountNumber: '',
-              accountType: '',
-              employmentContract: null,
-              investmentType: '',
-              investmentAmount: '',
-              investmentTerm: '',
-              paypalEmail: ''
-            })
-            setIsLoanModalOpen(false);
-            setCurrentStep(1);
-          }, 3000);
-
-        } catch (emailError) {
-          console.error('Error sending confirmation email:', emailError);
-          // Show error message but still close the form
-      toast({
-            title: "Error",
-            description: "There was an error sending the confirmation email, but your loan application was submitted successfully.",
-        duration: 5000,
-            className: "bg-yellow-500 text-white",
-          });
-
-          // Wait for 3 seconds before closing the modal and resetting the form
-      setTimeout(() => {
-        setFormData({
-              fullName: '',
-              email: '',
-              phone: '',
-              address: '',
-              employmentStatus: '',
-              monthlyIncome: '',
-              loanAmount: '',
-              loanPurpose: '',
-              returnDate: '',
-              bankName: '',
-              accountNumber: '',
-              accountType: '',
-          employmentContract: null,
-              investmentType: '',
-              investmentAmount: '',
-              investmentTerm: '',
-              paypalEmail: ''
-            })
-            setIsLoanModalOpen(false);
-            setCurrentStep(1);
-          }, 3000);
-        }
-
-      } catch (dbError) {
-        console.error('Error creating loan record:', dbError)
-        toast({
-          title: "Error",
-          description: "Failed to create loan record. Please try again.",
-          variant: "destructive",
-        })
+      if (error) {
+        console.error('Database error:', error)
+        throw new Error(`Database error: ${error.message}`)
       }
+
+      // Send email notification
+      try {
+        console.log('Attempting to send email notification...');
+        
+        // Initialize EmailJS with your public key
+        emailjs.init("xC1QMlEUFiMQaCmHA");
+        
+        // Prepare email template parameters
+        const templateParams = {
+          to_name: formData.fullName,
+          to_email: formData.email,
+          message: "Your loan application has been received and is pending approval. We will review your application and get back to you shortly.",
+          loan_amount: loanAmount.toFixed(2),
+          total_amount: returningAmount.toFixed(2),
+          due_date: formData.returnDate,
+          interests: `${(interestRate * 100).toFixed(2)}%`,
+          from_name: "Green Fina Team",
+          from_email: "clintonbonganikhoza@gmail.com",
+          reply_to: "clintonbonganikhoza@gmail.com"
+        };
+
+        console.log('Sending email with params:', templateParams);
+        
+        const emailResponse = await emailjs.send(
+          "service_1mact5a",  // Updated service ID
+          "template_3ns00mj",
+          templateParams
+        );
+        
+        if (emailResponse.status === 200) {
+          console.log('Email notification sent successfully:', emailResponse);
+        } else {
+          console.error('Email sending failed with status:', emailResponse.status);
+        }
+      } catch (emailError: any) {
+        console.error('Error sending email:', {
+          message: emailError.message,
+          status: emailError.status,
+          text: emailError.text,
+          details: emailError
+        });
+        // Don't throw the error as the loan application was already submitted
+      }
+
+      // Show success dialog
+      setIsLoanSuccessDialogOpen(true)
+      setIsLoanModalOpen(false)
+      toast({
+        title: "Loan Application Submitted",
+        description: "Your application has been received and is under review.",
+        variant: "default",
+      })
+
+      // Reset form
+      setFormData({
+        fullName: "",
+        email: "",
+        phone: "",
+        address: "",
+        employmentStatus: "",
+        monthlyIncome: "",
+        loanAmount: "",
+        loanPurpose: "",
+        returnDate: "",
+        bankName: "",
+        accountNumber: "",
+        accountType: "",
+        bankStatement: null,
+        proofOfId: null,
+        employmentContract: null,
+      })
     } catch (error) {
       console.error('Error submitting loan:', error)
       toast({
         title: "Error",
-        description: "Failed to submit loan application. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to submit loan application",
         variant: "destructive",
       })
     } finally {
@@ -1036,14 +1030,6 @@ export default function UserDashboard() {
     }
   }
 
-  // Calculate return amount with 40% interest
-  const calculateReturnAmount = (amount: string) => {
-    if (!amount) return "0"
-    const loanAmount = parseFloat(amount)
-    const interest = loanAmount * 0.4
-    return (loanAmount + interest).toFixed(2)
-  }
-
   // Check if loan amount exceeds 40% of monthly income
   const checkLoanEligibility = (loanAmount: string, monthlyIncome: string) => {
     if (!loanAmount || !monthlyIncome) return true
@@ -1128,18 +1114,52 @@ export default function UserDashboard() {
 
   const loanMetrics = calculateLoanMetrics()
 
+  // Add effect to auto-fill form with user data
+  useEffect(() => {
+    if (userProfile) {
+      setFormData(prev => ({
+        ...prev,
+        fullName: userProfile.full_name || '',
+        email: userProfile.email || '',
+        phone: userProfile.phone || '',
+        monthlyIncome: userProfile.monthly_income?.toString() || '',
+        employmentStatus: userProfile.employment_status || ''
+      }))
+    }
+  }, [userProfile])
+
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
-    return (
+        return (
           <div className="space-y-3">
             <div className="space-y-1">
               <Label className="text-xs text-white/60">Full Name</Label>
               <Input
                 placeholder="Enter your full name"
                 value={formData.fullName}
-                onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                readOnly
+                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40 cursor-not-allowed"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-white/60">Email</Label>
+              <Input
+                type="email"
+                placeholder="Enter your email"
+                value={formData.email}
+                readOnly
+                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40 cursor-not-allowed"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-white/60">Phone Number</Label>
+              <Input
+                type="tel"
+                placeholder="Enter your phone number"
+                value={formData.phone}
+                readOnly
+                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40 cursor-not-allowed"
               />
             </div>
             <div className="space-y-1">
@@ -1187,19 +1207,8 @@ export default function UserDashboard() {
                 type="number"
                 placeholder="Enter your monthly income"
                 value={formData.monthlyIncome}
-                onChange={(e) => {
-                  const income = e.target.value
-                  setFormData({ ...formData, monthlyIncome: income })
-                  // Check loan eligibility
-                  if (!checkLoanEligibility(formData.loanAmount, income)) {
-                    toast({
-                      title: "Loan Amount Too High",
-                      description: "Your loan amount exceeds 40% of your monthly income. Please enter a lower amount.",
-                      variant: "destructive",
-                    })
-                  }
-                }}
-                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                readOnly
+                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40 cursor-not-allowed"
               />
             </div>
             <div className="space-y-1">
@@ -1211,36 +1220,20 @@ export default function UserDashboard() {
                 className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
               />
             </div>
-      </div>
-    )
+          </div>
+        )
       case 2:
         return (
           <div className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs text-white/60">Bank Name</Label>
-              <Select
-                value={formData.bankName}
-                onValueChange={(value) => setFormData({ ...formData, bankName: value })}
-              >
-                <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
-                  <SelectValue placeholder="Select Bank" />
-                </SelectTrigger>
-                <SelectContent className="bg-[#111111] border-white/10">
-                  <SelectItem value="fnb">FNB</SelectItem>
-                  <SelectItem value="standard">Standard Bank</SelectItem>
-                  <SelectItem value="absa">ABSA</SelectItem>
-                  <SelectItem value="nedbank">Nedbank</SelectItem>
-                  <SelectItem value="capitec">Capitec</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+           
             <div className="space-y-1">
               <Label className="text-xs text-white/60">Account Number</Label>
               <Input
-                placeholder="Enter your account number"
+                type="text"
                 value={formData.accountNumber}
                 onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
+                className="bg-white/5 border-white/10 text-white"
+                placeholder="Enter your account number"
               />
             </div>
             <div className="space-y-1">
@@ -1249,13 +1242,33 @@ export default function UserDashboard() {
                 value={formData.accountType}
                 onValueChange={(value) => setFormData({ ...formData, accountType: value })}
               >
-                <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
+                <SelectTrigger className="bg-white/5 border-white/10 text-white">
                   <SelectValue placeholder="Select Account Type" />
                 </SelectTrigger>
-                <SelectContent className="bg-[#111111] border-white/10">
-                  <SelectItem value="savings">Savings</SelectItem>
-                  <SelectItem value="checking">Checking</SelectItem>
-                  <SelectItem value="business">Business</SelectItem>
+                <SelectContent className="bg-gray-900 border-white/10">
+                  <SelectItem value="Savings" className="text-white hover:bg-white/10">Savings</SelectItem>
+                  <SelectItem value="Checking" className="text-white hover:bg-white/10">Checking</SelectItem>
+                  <SelectItem value="Business" className="text-white hover:bg-white/10">Business</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-white/60">Bank Name</Label>
+              <Select
+                value={formData.bankName}
+                onValueChange={(value) => setFormData({ ...formData, bankName: value })}
+              >
+                <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectValue placeholder="Select Bank" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-white/10">
+                  <SelectItem value="FNB" className="text-white hover:bg-white/10">FNB</SelectItem>
+                  <SelectItem value="Capitec" className="text-white hover:bg-white/10">Capitec</SelectItem>
+                  <SelectItem value="Nedbank" className="text-white hover:bg-white/10">Nedbank</SelectItem>
+                  <SelectItem value="Tyme Bank" className="text-white hover:bg-white/10">Tyme Bank</SelectItem>
+                  <SelectItem value="Standard Bank" className="text-white hover:bg-white/10">Standard Bank</SelectItem>
+                  <SelectItem value="ABSA" className="text-white hover:bg-white/10">ABSA</SelectItem>
+                  <SelectItem value="African Bank" className="text-white hover:bg-white/10">African Bank</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1320,32 +1333,14 @@ export default function UserDashboard() {
               </label>
             </div>
 
-            <div className="bg-white/5 rounded-lg p-3 hover:bg-white/10 transition-colors cursor-pointer group">
-              <input
+            <div className="space-y-2">
+              <Label>Employment Contract (Optional)</Label>
+              <Input
                 type="file"
-                id="contract"
-                className="hidden"
-                accept=".pdf,.doc,.docx"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    setFormData({ ...formData, employmentContract: file })
-                  }
-                }}
+                accept=".pdf"
+                onChange={(e) => setFormData({ ...formData, employmentContract: e.target.files?.[0] || null })}
+                className="bg-white/5 border-white/10 text-white"
               />
-              <label htmlFor="contract" className="cursor-pointer">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <FileText className="h-4 w-4 text-purple-400" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">Employment Contract</p>
-                    <p className="text-xs text-white/40">
-                      {formData.employmentContract ? formData.employmentContract.name : 'Optional document'}
-                    </p>
-                  </div>
-                </div>
-              </label>
             </div>
       </div>
     )
@@ -1962,6 +1957,185 @@ export default function UserDashboard() {
       });
     }
   };
+
+  const handleTermsAccept = async () => {
+    setTermsAccepted(true)
+    setIsTermsDialogOpen(false)
+    
+    try {
+      setIsSubmitting(true)
+      const userId = authState.getUserId()
+      if (!userId) {
+        throw new Error('User not authenticated')
+      }
+
+      // Upload documents
+      const documentUrls = {
+        bank_statement_url: null,
+        id_document_url: null,
+        employment_contract_url: null
+      }
+
+      if (formData.bankStatement) {
+        const { data: bankStatementData, error: bankStatementError } = await supabaseRef.current
+          .storage
+          .from('documents')
+          .upload(`${userId}/bank_statement_${Date.now()}.pdf`, formData.bankStatement)
+
+        if (bankStatementError) throw bankStatementError
+        documentUrls.bank_statement_url = bankStatementData.path
+      }
+
+      if (formData.proofOfId) {
+        const { data: idDocumentData, error: idDocumentError } = await supabaseRef.current
+          .storage
+          .from('documents')
+          .upload(`${userId}/id_document_${Date.now()}.pdf`, formData.proofOfId)
+
+        if (idDocumentError) throw idDocumentError
+        documentUrls.id_document_url = idDocumentData.path
+      }
+
+      if (formData.employmentContract) {
+        const { data: employmentContractData, error: employmentContractError } = await supabaseRef.current
+          .storage
+          .from('documents')
+          .upload(`${userId}/employment_contract_${Date.now()}.pdf`, formData.employmentContract)
+
+        if (employmentContractError) throw employmentContractError
+        documentUrls.employment_contract_url = employmentContractData.path
+      }
+
+      // Calculate returning amount
+      const loanAmount = parseFloat(formData.loanAmount)
+      const interestRate = loanAmount < 1000 ? 0.4999 : 0.3999
+      const returningAmount = loanAmount * (1 + interestRate)
+
+      // Create loan application
+      const { error } = await supabaseRef.current
+        .from('loan_applications')  // Changed from 'loans' to 'loan_applications'
+        .insert({
+          user_id: userId,
+          amount: loanAmount,
+          term: 3, // Default to 3 months if not specified
+          purpose: formData.loanPurpose,
+          status: 'pending',
+          bank_statement_url: documentUrls.bank_statement_url,
+          id_document_url: documentUrls.id_document_url,
+          contract_url: documentUrls.employment_contract_url,
+          additional_documents: {},
+          ai_recommendation: 'pending',
+          ai_risk_score: 0,
+          rejection_reason: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          returning_amount: returningAmount,
+          full_names: formData.fullName,
+          employment_status: formData.employmentStatus,
+          monthly_income: parseFloat(formData.monthlyIncome),
+          returning_date: formData.returnDate,
+          account_number: formData.accountNumber,
+          doubled_interests: false,
+          email: formData.email,
+          cellphone_number: formData.phone,
+          ai_risk_factors: '',
+          bank_name: formData.bankName
+        })
+
+      if (error) {
+        console.error('Database error:', error)
+        throw new Error(`Database error: ${error.message}`)
+      }
+
+      // Send email notification
+      try {
+        console.log('Attempting to send email notification...');
+        
+        // Initialize EmailJS with your public key
+        emailjs.init("xC1QMlEUFiMQaCmHA");
+        
+        // Prepare email template parameters
+        const templateParams = {
+          to_name: formData.fullName,
+          to_email: formData.email,
+          message: "Your loan application has been received and is pending approval. We will review your application and get back to you shortly.",
+          loan_amount: loanAmount.toFixed(2),
+          total_amount: returningAmount.toFixed(2),
+          due_date: formData.returnDate,
+          interests: `${(interestRate * 100).toFixed(2)}%`,
+          from_name: "Green Fina Team",
+          from_email: "clintonbonganikhoza@gmail.com",
+          reply_to: "clintonbonganikhoza@gmail.com"
+        };
+
+        console.log('Sending email with params:', templateParams);
+        
+        const emailResponse = await emailjs.send(
+          "service_1mact5a",  // Updated service ID
+          "template_3ns00mj",
+          templateParams
+        );
+        
+        if (emailResponse.status === 200) {
+          console.log('Email notification sent successfully:', emailResponse);
+        } else {
+          console.error('Email sending failed with status:', emailResponse.status);
+        }
+      } catch (emailError: any) {
+        console.error('Error sending email:', {
+          message: emailError.message,
+          status: emailError.status,
+          text: emailError.text,
+          details: emailError
+        });
+        // Don't throw the error as the loan application was already submitted
+      }
+
+      // Show success dialog
+      setIsLoanSuccessDialogOpen(true)
+      setIsLoanModalOpen(false)
+      toast({
+        title: "Loan Application Submitted",
+        description: "Your application has been received and is under review.",
+        variant: "default",
+      })
+
+      // Reset form
+      setFormData({
+        fullName: "",
+        email: "",
+        phone: "",
+        address: "",
+        employmentStatus: "",
+        monthlyIncome: "",
+        loanAmount: "",
+        loanPurpose: "",
+        returnDate: "",
+        bankName: "",
+        accountNumber: "",
+        accountType: "",
+        bankStatement: null,
+        proofOfId: null,
+        employmentContract: null,
+      })
+    } catch (error) {
+      console.error('Error submitting loan:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to submit loan application",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Initialize EmailJS
+  useEffect(() => {
+    console.log('Initializing EmailJS...');
+    emailjs.init("xC1QMlEUFiMQaCmHA");
+    console.log('EmailJS initialized');
+  }, []);
 
   return (
     <div className={styles.dashboardContainer}>
@@ -2640,404 +2814,284 @@ export default function UserDashboard() {
 
       {/* Loan Application Modal */}
       <Dialog open={isLoanModalOpen} onOpenChange={setIsLoanModalOpen}>
-        <DialogContent className="bg-[#111111] text-white border-white/10 max-w-md">
-          <div className="absolute right-4 top-4">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setIsLoanModalOpen(false)}
-              className="text-white/70 hover:text-white hover:bg-white/10"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto bg-[#111111] text-white border-white/10">
           <DialogHeader>
-            <DialogTitle className="text-lg font-medium flex items-center gap-2">
-              <div className="h-6 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
-              Step {currentStep}/3
-            </DialogTitle>
-            <DialogDescription className="text-white/60 text-sm">
-              {currentStep === 1 && "Quick Personal Details"}
-              {currentStep === 2 && "Banking Information"}
-              {currentStep === 3 && "Required Documents"}
+            <DialogTitle>Apply for a Loan</DialogTitle>
+            <DialogDescription className="text-white/70">
+              Please fill out all required information to apply for a loan
             </DialogDescription>
           </DialogHeader>
-
-          {/* Step Progress Indicator */}
-          <div className="flex items-center justify-center gap-1 mb-4">
-            {[1, 2, 3].map((step) => (
-              <div key={step} className="flex items-center gap-1">
-                <div
-                  className={`h-6 w-6 rounded-full flex items-center justify-center transition-all duration-300 ${
-                    step === currentStep
-                      ? "bg-gradient-to-r from-green-400 to-sky-400 shadow-lg shadow-green-500/20"
-                      : step < currentStep
-                      ? "bg-green-500/20 text-green-400"
-                      : "bg-white/5 text-white/40"
-                  }`}
+          <form onSubmit={(e) => { e.preventDefault(); handleSubmitLoan(); }} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Full Name</Label>
+                <Input
+                  id="fullName"
+                  value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="employmentStatus">Employment Status</Label>
+                <Select
+                  value={formData.employmentStatus}
+                  onValueChange={(value) => setFormData({ ...formData, employmentStatus: value })}
                 >
-                  {step === 1 && <User className="h-3 w-3" />}
-                  {step === 2 && <Building2 className="h-3 w-3" />}
-                  {step === 3 && <FileText className="h-3 w-3" />}
+                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-white/10">
+                    <SelectItem value="employed" className="text-white hover:bg-white/10">Employed</SelectItem>
+                    <SelectItem value="self-employed" className="text-white hover:bg-white/10">Self-Employed</SelectItem>
+                    <SelectItem value="unemployed" className="text-white hover:bg-white/10">Unemployed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="monthlyIncome">Monthly Income (R)</Label>
+                <Input
+                  id="monthlyIncome"
+                  type="number"
+                  value={formData.monthlyIncome}
+                  onChange={(e) => setFormData({ ...formData, monthlyIncome: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="loanAmount">Loan Amount (R)</Label>
+                <Input
+                  id="loanAmount"
+                  type="number"
+                  value={formData.loanAmount}
+                  onChange={(e) => setFormData({ ...formData, loanAmount: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+
+              {/* Loan Summary */}
+              <div className="col-span-2 space-y-4 p-6 bg-gradient-to-br from-gray-900/50 to-black/50 rounded-xl border border-white/10 backdrop-blur-sm">
+                <h3 className="text-white font-medium text-lg tracking-wider flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+                  Loan Summary
+                </h3>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <p className="text-white/50 text-sm font-medium">Loan Amount</p>
+                    <p className="text-white text-2xl font-semibold tracking-tight">
+                      R{parseFloat(formData.loanAmount || '0').toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-white/50 text-sm font-medium">Interest Rate</p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-white text-2xl font-semibold tracking-tight">
+                          {parseFloat(formData.loanAmount || '0') < 1000 ? '49.99%' : '39.99%'}
+                        </p>
+                        <div className="relative w-12 h-8">
+                          <svg className="w-full h-full" viewBox="0 0 100 60" preserveAspectRatio="none">
+                            <path
+                              d="M0,50 L20,40 L40,45 L60,30 L80,20 L100,10"
+                              fill="none"
+                              stroke="rgb(74 222 128)"
+                              strokeWidth="2"
+                              className="animate-[draw_2s_ease-in-out_infinite]"
+                            />
+                            <circle
+                              cx="100"
+                              cy="10"
+                              r="3"
+                              fill="rgb(74 222 128)"
+                              className="animate-pulse"
+                            />
+                          </svg>
+                          <style jsx>{`
+                            @keyframes draw {
+                              0% {
+                                stroke-dasharray: 0 1000;
+                                stroke-dashoffset: 0;
+                              }
+                              50% {
+                                stroke-dasharray: 1000 0;
+                                stroke-dashoffset: 0;
+                              }
+                              100% {
+                                stroke-dasharray: 0 1000;
+                                stroke-dashoffset: -1000;
+                              }
+                            }
+                          `}</style>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-white/50 text-sm font-medium">Interest Amount</p>
+                    <p className="text-white text-2xl font-semibold tracking-tight">
+                      R{(parseFloat(formData.loanAmount || '0') * (parseFloat(formData.loanAmount || '0') < 1000 ? 0.5 : 0.4)).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-white/50 text-sm font-medium">Total Amount</p>
+                    <p className="text-green-400 text-3xl font-bold tracking-tight animate-pulse">
+                      R{calculateReturnAmount(formData.loanAmount).toLocaleString()}
+                    </p>
+                  </div>
                 </div>
-                {step < 3 && (
-                  <div className="w-8 h-0.5 bg-gradient-to-r from-green-400/20 to-sky-400/20"></div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="accountNumber">Account Number</Label>
+                <Input
+                  id="accountNumber"
+                  value={formData.accountNumber}
+                  onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="accountType">Account Type</Label>
+                <Select
+                  value={formData.accountType}
+                  onValueChange={(value) => setFormData({ ...formData, accountType: value })}
+                >
+                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                    <SelectValue placeholder="Select Account Type" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-white/10">
+                    <SelectItem value="Savings" className="text-white hover:bg-white/10">Savings</SelectItem>
+                    <SelectItem value="Checking" className="text-white hover:bg-white/10">Checking</SelectItem>
+                    <SelectItem value="Business" className="text-white hover:bg-white/10">Business</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="bankName">Bank Name</Label>
+                <Select
+                  value={formData.bankName}
+                  onValueChange={(value) => setFormData({ ...formData, bankName: value })}
+                >
+                  <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                    <SelectValue placeholder="Select Bank" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-white/10">
+                    <SelectItem value="FNB" className="text-white hover:bg-white/10">FNB</SelectItem>
+                    <SelectItem value="Capitec" className="text-white hover:bg-white/10">Capitec</SelectItem>
+                    <SelectItem value="Nedbank" className="text-white hover:bg-white/10">Nedbank</SelectItem>
+                    <SelectItem value="Tyme Bank" className="text-white hover:bg-white/10">Tyme Bank</SelectItem>
+                    <SelectItem value="Standard Bank" className="text-white hover:bg-white/10">Standard Bank</SelectItem>
+                    <SelectItem value="ABSA" className="text-white hover:bg-white/10">ABSA</SelectItem>
+                    <SelectItem value="African Bank" className="text-white hover:bg-white/10">African Bank</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="returnDate">Return Date</Label>
+                <Input
+                  id="returnDate"
+                  type="date"
+                  value={formData.returnDate}
+                  onChange={(e) => setFormData({ ...formData, returnDate: e.target.value })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="loanPurpose">Loan Purpose</Label>
+              <Textarea
+                id="loanPurpose"
+                value={formData.loanPurpose}
+                onChange={(e) => setFormData({ ...formData, loanPurpose: e.target.value })}
+                required
+                className="bg-white/5 border-white/10 text-white min-h-[100px]"
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Bank Statement (Last 3 Months)</Label>
+                <Input
+                  type="file"
+                  accept=".pdf"
+                  onChange={(e) => setFormData({ ...formData, bankStatement: e.target.files?.[0] || null })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>ID Document</Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => setFormData({ ...formData, proofOfId: e.target.files?.[0] || null })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Employment Contract</Label>
+                <Input
+                  type="file"
+                  accept=".pdf"
+                  onChange={(e) => setFormData({ ...formData, employmentContract: e.target.files?.[0] || null })}
+                  required
+                  className="bg-white/5 border-white/10 text-white"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsLoanModalOpen(false)}
+                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-white"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit Application'
                 )}
-              </div>
-            ))}
-          </div>
-
-          {/* Step Content */}
-          <div className="py-2">
-            {currentStep === 1 && (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Full Name</Label>
-                  <Input
-                    placeholder="Enter your full name"
-                    value={formData.fullName}
-                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Loan Amount</Label>
-                  <Input
-                    type="number"
-                    placeholder="Enter loan amount"
-                    value={formData.loanAmount}
-                    onChange={(e) => {
-                      const amount = e.target.value
-                      setFormData({ ...formData, loanAmount: amount })
-                      // Check loan eligibility
-                      if (!checkLoanEligibility(amount, formData.monthlyIncome)) {
-                        toast({
-                          title: "Loan Amount Too High",
-                          description: "Your loan amount exceeds 40% of your monthly income. Please enter a lower amount.",
-                          variant: "destructive",
-                        })
-                      }
-                    }}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Return Amount (including 40% interest)</Label>
-                  <Input
-                    type="text"
-                    value={calculateReturnAmount(formData.loanAmount)}
-                    readOnly
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Return Date</Label>
-                  <Input
-                    type="date"
-                    value={formData.returnDate}
-                    onChange={(e) => setFormData({ ...formData, returnDate: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Monthly Income</Label>
-                  <Input
-                    type="number"
-                    placeholder="Enter your monthly income"
-                    value={formData.monthlyIncome}
-                    onChange={(e) => {
-                      const income = e.target.value
-                      setFormData({ ...formData, monthlyIncome: income })
-                      // Check loan eligibility
-                      if (!checkLoanEligibility(formData.loanAmount, income)) {
-                        toast({
-                          title: "Loan Amount Too High",
-                          description: "Your loan amount exceeds 40% of your monthly income. Please enter a lower amount.",
-                          variant: "destructive",
-                        })
-                      }
-                    }}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Loan Purpose</Label>
-                  <Input
-                    placeholder="Describe the purpose of your loan"
-                    value={formData.loanPurpose}
-                    onChange={(e) => setFormData({ ...formData, loanPurpose: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-              </div>
-            )}
-
-            {currentStep === 2 && (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Bank Name</Label>
-                  <Select
-                    value={formData.bankName}
-                    onValueChange={(value) => setFormData({ ...formData, bankName: value })}
-                  >
-                    <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
-                      <SelectValue placeholder="Select Bank" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#111111] border-white/10">
-                      <SelectItem value="fnb">FNB</SelectItem>
-                      <SelectItem value="standard">Standard Bank</SelectItem>
-                      <SelectItem value="absa">ABSA</SelectItem>
-                      <SelectItem value="nedbank">Nedbank</SelectItem>
-                      <SelectItem value="capitec">Capitec</SelectItem>
-                    </SelectContent>
-                  </Select>
-            </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Account Number</Label>
-                  <Input
-                    placeholder="Enter your account number"
-                    value={formData.accountNumber}
-                    onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                    className="bg-white/5 border-0 text-sm h-9 placeholder:text-white/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs text-white/60">Account Type</Label>
-                  <Select
-                    value={formData.accountType}
-                    onValueChange={(value) => setFormData({ ...formData, accountType: value })}
-                  >
-                    <SelectTrigger className="bg-white/5 border-0 text-sm h-9">
-                      <SelectValue placeholder="Select Account Type" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#111111] border-white/10">
-                      <SelectItem value="savings">Savings</SelectItem>
-                      <SelectItem value="checking">Checking</SelectItem>
-                      <SelectItem value="business">Business</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            {currentStep === 3 && (
-              <div className="space-y-3">
-                <div className="bg-white/5 rounded-lg p-3 hover:bg-white/10 transition-colors cursor-pointer group">
-                  <input
-                    type="file"
-                    id="bankStatement"
-                    className="hidden"
-                    accept=".pdf,.doc,.docx"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) {
-                        setFormData({ ...formData, bankStatement: file })
-                      }
-                    }}
-                  />
-                  <label htmlFor="bankStatement" className="cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <Upload className="h-4 w-4 text-green-400" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Bank Statements</p>
-                        <p className="text-xs text-white/40">
-                          {formData.bankStatement ? formData.bankStatement.name : 'Last 3 months required'}
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="bg-white/5 rounded-lg p-3 hover:bg-white/10 transition-colors cursor-pointer group">
-                  <input
-                    type="file"
-                    id="idDocument"
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) {
-                        setFormData({ ...formData, proofOfId: file })
-                      }
-                    }}
-                  />
-                  <label htmlFor="idDocument" className="cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-sky-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <FileText className="h-4 w-4 text-sky-400" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Proof of ID</p>
-                        <p className="text-xs text-white/40">
-                          {formData.proofOfId ? formData.proofOfId.name : 'Valid government ID required'}
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="bg-white/5 rounded-lg p-3 hover:bg-white/10 transition-colors cursor-pointer group">
-                  <input
-                    type="file"
-                    id="contract"
-                    className="hidden"
-                    accept=".pdf,.doc,.docx"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) {
-                        setFormData({ ...formData, employmentContract: file })
-                      }
-                    }}
-                  />
-                  <label htmlFor="contract" className="cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <FileText className="h-4 w-4 text-purple-400" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">Employment Contract</p>
-                        <p className="text-xs text-white/40">
-                          {formData.employmentContract ? formData.employmentContract.name : 'Optional document'}
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Navigation Buttons */}
-          <div className="flex gap-2 mt-4">
-            <Button
-              variant="outline"
-              onClick={handlePreviousStep}
-              disabled={currentStep === 1}
-              className="flex-1 border-0 bg-white/5 hover:bg-white/10 text-white text-sm h-9"
-            >
-              Back
-                  </Button>
-            <Button
-              onClick={currentStep === 3 ? handleSubmitLoan : handleNextStep}
-              className="flex-1 bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-sm h-9"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <div className="flex items-center gap-2">
-                  <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span>Processing...</span>
-                </div>
-              ) : currentStep === 3 ? "Submit" : "Continue"}
-                  </Button>
-            </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Loan Details Dialog */}
-      <Dialog open={isLoanDetailsOpen} onOpenChange={setIsLoanDetailsOpen}>
-        <DialogContent className="bg-[#111111] text-white border-white/10 max-w-sm">
-          <div className="absolute right-4 top-4">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setIsLoanDetailsOpen(false)}
-              className="text-white/70 hover:text-white hover:bg-white/10"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-          <DialogHeader>
-            <DialogTitle className="text-lg font-medium">Loan Details</DialogTitle>
-          </DialogHeader>
-          {selectedLoan && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-white/60">Amount</p>
-                  <p className="text-base font-medium">R {selectedLoan.amount}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-white/60">Return Amount</p>
-                  <p className="text-base font-medium">R {selectedLoan.returning_amount}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-white/60">Status</p>
-                  <p className={`text-base font-medium ${
-                    selectedLoan.status === 'pending' ? 'text-orange-500' : 
-                    selectedLoan.status === 'approved' ? 'text-green-500' : 
-                    'text-red-500'
-                  }`}>
-                    {selectedLoan.status}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-white/60">Term</p>
-                  <p className="text-base font-medium">{selectedLoan.term} days</p>
-                </div>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Purpose</p>
-                <p className="text-base font-medium">{selectedLoan.purpose}</p>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Monthly Income</p>
-                <p className="text-base font-medium">R {selectedLoan.monthly_income}</p>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Employment Status</p>
-                <p className="text-base font-medium">{selectedLoan.employment_status || 'Not specified'}</p>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Application Date</p>
-                <p className="text-base font-medium">
-                  {new Date(selectedLoan.created_at).toLocaleDateString()}
-                </p>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Withdraw Confirmation Dialog */}
-      <Dialog open={isWithdrawConfirmOpen} onOpenChange={setIsWithdrawConfirmOpen}>
-        <DialogContent className="bg-[#111111] text-white border-white/10 max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-medium">Confirm Withdrawal</DialogTitle>
-            <DialogDescription className="text-white/60">
-              Are you sure you want to withdraw this loan?
-            </DialogDescription>
-          </DialogHeader>
-          {selectedLoan && (
-            <div className="space-y-4">
-              <div className="bg-[#1A1A1A] p-3 rounded-lg">
-                <p className="text-sm font-medium">R {selectedLoan.amount}</p>
-                <p className="text-xs text-white/60">{selectedLoan.purpose}</p>
-                <p className="text-xs text-white/60">
-                  Status: <span className="text-orange-500">{selectedLoan.status}</span>
-                </p>
-                <p className="text-xs text-white/40">
-                  Applied: {new Date(selectedLoan.created_at).toLocaleDateString()}
-                </p>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsWithdrawConfirmOpen(false)}
-                  className="border-white/10 hover:bg-white/5"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => handleWithdrawLoan(selectedLoan.id)}
-                >
-                  Confirm Withdrawal
-                </Button>
-              </div>
-            </div>
-          )}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -4015,6 +4069,161 @@ export default function UserDashboard() {
             </Button>
             <Button onClick={handleAcceptTerms}>
               Accept Terms and Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Loan Success Dialog */}
+      <Dialog open={isLoanSuccessDialogOpen} onOpenChange={setIsLoanSuccessDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-[#111111] text-white border-white/10">
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-r from-green-400/20 to-sky-400/20 rounded-lg blur-xl"></div>
+            <DialogHeader className="relative">
+              <div className="flex justify-center mb-4">
+                <div className="h-16 w-16 rounded-full bg-gradient-to-r from-green-400 to-sky-400 flex items-center justify-center">
+                  <Check className="h-8 w-8 text-white" />
+                </div>
+              </div>
+              <DialogTitle className="text-center text-2xl font-bold bg-gradient-to-r from-green-400 to-sky-400 bg-clip-text text-transparent">
+                Loan Application Submitted Successfully!
+              </DialogTitle>
+              <DialogDescription className="text-center text-white/70 mt-2 space-y-2">
+                <span className="block">Your loan application has been received and is pending approval. We will review your application and get back to you shortly.</span>
+                <span className="block font-medium text-green-400">Please check your email for further updates.</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-center mt-6">
+              <Button
+                onClick={() => {
+                  setIsLoanSuccessDialogOpen(false)
+                  setIsLoanModalOpen(false)
+                  router.push('/userDashboard')
+                }}
+                className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-white px-8"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Terms and Conditions Dialog */}
+      <Dialog open={isTermsDialogOpen} onOpenChange={setIsTermsDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] bg-[#111111] text-white border-white/10">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold bg-gradient-to-r from-green-400 to-sky-400 bg-clip-text text-transparent">
+              Terms and Conditions
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Review Time</h3>
+              <p className="text-white/70">Your loan application will be reviewed within 20 minutes. You will receive a response shortly after.</p>
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Interest Rates</h3>
+              <ul className="list-disc pl-5 text-white/70 space-y-1">
+                <li>Loans less than R1,000: 49.99% interest rate</li>
+                <li>Loans R1,000 and above: 39.99% interest rate</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Late Payment Policy</h3>
+              <p className="text-white/70">If payment is not made on the selected due date, an additional interest of 39.99% or 49.99% (depending on your initial loan amount) will be applied to the outstanding balance.</p>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Loan Details</h3>
+              <div className="bg-white/5 p-4 rounded-lg space-y-2">
+                <p className="text-white/70">Amount: R{formData.loanAmount}</p>
+                <p className="text-white/70">Purpose: {formData.loanPurpose}</p>
+                <p className="text-white/70">Return Date: {formData.returnDate}</p>
+                <p className="text-white/70">Interest Rate: {parseFloat(formData.loanAmount) < 1000 ? '49.99%' : '39.99%'}</p>
+                <p className="text-white/70 font-semibold">Amount to Pay: R{(parseFloat(formData.loanAmount) * (parseFloat(formData.loanAmount) < 1000 ? 1.4999 : 1.3999)).toFixed(2)}</p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsTermsDialogOpen(false)}
+              className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleTermsAccept}
+              className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 text-white"
+            >
+              Accept Terms & Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Loan Terms Dialog */}
+      <Dialog open={isLoanTermsDialogOpen} onOpenChange={setIsLoanTermsDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] bg-[#111111] text-white border-white/10">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold bg-gradient-to-r from-green-400 to-sky-400 bg-clip-text text-transparent">
+              Loan Terms and Conditions
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Review Time</h3>
+              <p className="text-white/70">Your loan application will be reviewed within 20 minutes. You will receive a response shortly after.</p>
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Interest Rates</h3>
+              <ul className="list-disc pl-5 text-white/70 space-y-1">
+                <li>Loans less than R1,000: 49.99% interest rate</li>
+                <li>Loans R1,000 and above: 39.99% interest rate</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Late Payment Policy</h3>
+              <p className="text-white/70">If payment is not made on the selected due date, an additional interest of 39.99% or 49.99% (depending on your initial loan amount) will be applied to the outstanding balance.</p>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-semibold text-green-400">Loan Details</h3>
+              <div className="bg-white/5 p-4 rounded-lg space-y-2">
+                <p className="text-white/70">Amount: R{formData.loanAmount}</p>
+                <p className="text-white/70">Purpose: {formData.loanPurpose}</p>
+                <p className="text-white/70">Return Date: {formData.returnDate}</p>
+                <p className="text-white/70">Interest Rate: {parseFloat(formData.loanAmount) < 1000 ? '49.99%' : '39.99%'}</p>
+                <p className="text-white/70 font-semibold">Amount to Pay: R{(parseFloat(formData.loanAmount) * (parseFloat(formData.loanAmount) < 1000 ? 1.4999 : 1.3999)).toFixed(2)}</p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsLoanTermsDialogOpen(false)}
+              className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAcceptLoanTerms}
+              className="bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                'Accept & Submit'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
