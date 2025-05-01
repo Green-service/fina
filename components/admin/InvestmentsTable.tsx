@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import dynamic from 'next/dynamic';
 import {
   Table,
   TableBody,
@@ -29,17 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  ComposedChart,
-  Bar
-} from 'recharts'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
@@ -47,6 +37,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+
+// Dynamically import components that use client-side features
+const LineChart = dynamic(() => import('recharts').then(mod => mod.LineChart), { ssr: false });
+const Line = dynamic(() => import('recharts').then(mod => mod.Line), { ssr: false });
+const XAxis = dynamic(() => import('recharts').then(mod => mod.XAxis), { ssr: false });
+const YAxis = dynamic(() => import('recharts').then(mod => mod.YAxis), { ssr: false });
+const CartesianGrid = dynamic(() => import('recharts').then(mod => mod.CartesianGrid), { ssr: false });
+const Tooltip = dynamic(() => import('recharts').then(mod => mod.Tooltip), { ssr: false });
+const ResponsiveContainer = dynamic(() => import('recharts').then(mod => mod.ResponsiveContainer), { ssr: false });
+const ComposedChart = dynamic(() => import('recharts').then(mod => mod.ComposedChart), { ssr: false });
+const Bar = dynamic(() => import('recharts').then(mod => mod.Bar), { ssr: false });
 
 interface Investment {
   id: string;
