@@ -1,3 +1,5 @@
+"use client";
+
 import { InvestmentsTable } from "@/components/admin/InvestmentsTable";
 
 export default function InvestmentsPage() {
