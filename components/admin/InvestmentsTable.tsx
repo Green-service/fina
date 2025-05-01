@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import {
   Table,
   TableBody,
@@ -126,6 +126,7 @@ export function InvestmentsTable() {
   const [chartType, setChartType] = useState<"line" | "candlestick">("line");
   const [selectedUser, setSelectedUser] = useState<UserAccount | null>(null);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
     fetchInvestments();
