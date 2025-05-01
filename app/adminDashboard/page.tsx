@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useRouter } from "next/navigation"
-import { AdminSidebar } from "@/components/admin/sidebar"
+import { AdminSidebar } from "@/components/admin/sidebar-fixed"
 import { AdminNavbar } from "@/components/admin/navbar"
 import {
   Table,
@@ -60,6 +60,8 @@ import emailjs from '@emailjs/browser'
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { StokvelaGroupsModal } from "@/components/admin/StokvelaGroupsModal"
+import { InvestmentsModal } from "@/components/admin/InvestmentsModal"
 
 interface DashboardStats {
   totalLoans: number
@@ -76,6 +78,18 @@ interface DashboardStats {
   totalAmountAvailable: number
   totalAmount: number
   totalPaidAmount: number
+}
+
+interface StokvelaGroup {
+  id: string
+  name: string
+  description: string
+  target_amount: number
+  contribution_amount: number
+  frequency: string
+  created_by: string
+  created_at: string
+  updated_at: string
 }
 
 interface LoanApplication {
@@ -162,6 +176,9 @@ export default function AdminDashboardPage() {
   const [loanApplications, setLoanApplications] = useState<LoanApplication[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [topClients, setTopClients] = useState<TopClient[]>([])
+  const [stokvelaGroups, setStokvelaGroups] = useState<StokvelaGroup[]>([])
+  const [stokvelaMembers, setStokvelaMembers] = useState<any[]>([])
+  const [showStokvelaModal, setShowStokvelaModal] = useState(false)
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -185,6 +202,8 @@ export default function AdminDashboardPage() {
     loanId: string;
     action: 'approve' | 'reject' | 'paid' | 'ignored' | 'pending';
   } | null>(null)
+  const [isStokvelaGroupsOpen, setIsStokvelaGroupsOpen] = useState(false)
+  const [isInvestmentsOpen, setIsInvestmentsOpen] = useState(false)
 
   const fetchDashboardData = async () => {
     try {
@@ -277,6 +296,29 @@ export default function AdminDashboardPage() {
     }
   }
 
+  const fetchStokvelaGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stokvela_groups')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setStokvelaGroups(data || [])
+
+      // Fetch all stokvela members
+      const { data: members, error: membersError } = await supabase
+        .from('stokvela_members')
+        .select('*')
+        .order('position', { ascending: true })
+
+      if (membersError) throw membersError
+      setStokvelaMembers(members || [])
+    } catch (error) {
+      console.error('Error fetching stokvela data:', error)
+    }
+  }
+
   useEffect(() => {
     const checkAdminAccess = async () => {
       try {
@@ -289,12 +331,15 @@ export default function AdminDashboardPage() {
         }
 
         if (userRole !== "2") {
-          router.push("/userDashboard")
-          return
-        }
+        router.push("/userDashboard")
+        return
+      }
 
         setUser(currentUser)
-        await fetchDashboardData()
+        await Promise.all([
+          fetchDashboardData(),
+          fetchStokvelaGroups()
+        ])
       } catch (error) {
         console.error("Error checking admin status:", error)
         router.push("/login")
@@ -763,14 +808,23 @@ export default function AdminDashboardPage() {
 
   // Fetch users_account for user management
   const fetchUserAccounts = async () => {
-    const { data, error } = await supabase.from('users_account').select('*')
-    if (!error && data) setUserAccounts(data)
+    try {
+      const { data, error } = await supabase
+        .from('users_account')
+        .select('id, auth_id, full_name, email, user_role, created_at, updated_at, seen')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setUserAccounts(data || [])
+    } catch (error) {
+      console.error('Error fetching user accounts:', error)
+    }
   }
 
   // Add to useEffect to fetch on open
   useEffect(() => {
-    if (showUserManagement) fetchUserAccounts()
-  }, [showUserManagement])
+    if (showUserManagement || showStokvelaModal) fetchUserAccounts()
+  }, [showUserManagement, showStokvelaModal])
 
   // Helper for last sign in
   const isRecentSignIn = (lastSignIn: string) => {
@@ -826,10 +880,12 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#151521]">
+    <div className="min-h-screen bg-[#0A0A0F]">
       <AdminSidebar 
         onSignOut={handleSignOut} 
-        onUserManagementClick={() => setIsUserManagementOpen(true)} 
+        onUserManagementClick={() => setIsUserManagementOpen(true)}
+        onStokvelaGroupsClick={() => setIsStokvelaGroupsOpen(true)}
+        onInvestmentsClick={() => setIsInvestmentsOpen(true)}
       />
       <AdminNavbar />
       <div className="flex flex-1 overflow-hidden">
@@ -867,7 +923,7 @@ export default function AdminDashboardPage() {
                             className="p-3 border-b border-white/10 hover:bg-white/5"
                           >
                             <div className="flex items-center justify-between mb-2">
-                              <div>
+            <div>
                                 <p className="text-white font-medium text-sm">{loan.full_names || 'Unknown User'}</p>
                                 <p className="text-white/70 text-xs">R{parseFloat(loan.amount).toLocaleString()}</p>
                               </div>
@@ -905,9 +961,9 @@ export default function AdminDashboardPage() {
                         ))}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
+                    </div>
+              )}
+            </div>
             </div>
             {/* Stats Cards */}
             <div className="overflow-x-auto pb-4 -mx-4 px-4">
@@ -917,45 +973,45 @@ export default function AdminDashboardPage() {
                   <div className="absolute inset-0 bg-[url('/images/noise.png')] opacity-5"></div>
                   <CardHeader className="pb-2 space-y-0 relative">
                     <CardTitle className="text-sm font-medium text-white/70">Total Approved Loans</CardTitle>
-                  </CardHeader>
+                </CardHeader>
                   <CardContent className="relative">
                     <div className="text-2xl font-bold text-white group-hover:text-blue-400 transition-colors">{stats.approvedLoans}</div>
                     <div className="flex items-center mt-1">
                       <Badge className="bg-blue-500/20 text-blue-400 text-sm border border-blue-500/20">+11.01%</Badge>
                       <span className="text-xs text-white/50 ml-2">vs last month</span>
                     </div>
-                  </CardContent>
-                </Card>
+                </CardContent>
+              </Card>
 
                 <Card className="bg-emerald-500/10 backdrop-blur-xl border-[0.5px] border-emerald-500/20 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] relative overflow-hidden group hover:scale-[1.02] transition-all duration-300 w-[300px]">
                   <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent"></div>
                   <div className="absolute inset-0 bg-[url('/images/noise.png')] opacity-5"></div>
                   <CardHeader className="pb-2 space-y-0 relative">
                     <CardTitle className="text-sm font-medium text-white/70">Total Paid Loans</CardTitle>
-                  </CardHeader>
+                </CardHeader>
                   <CardContent className="relative">
                     <div className="text-2xl font-bold text-white group-hover:text-emerald-400 transition-colors">{stats.paidLoans}</div>
                     <div className="flex items-center mt-1">
                       <Badge className="bg-emerald-500/20 text-emerald-400 text-sm border border-emerald-500/20">+15.2%</Badge>
                       <span className="text-xs text-white/50 ml-2">vs last month</span>
                     </div>
-                  </CardContent>
-                </Card>
+                </CardContent>
+              </Card>
 
                 <Card className="bg-yellow-500/10 backdrop-blur-xl border-[0.5px] border-yellow-500/20 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] relative overflow-hidden group hover:scale-[1.02] transition-all duration-300 w-[300px]">
                   <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/10 via-transparent to-transparent"></div>
                   <div className="absolute inset-0 bg-[url('/images/noise.png')] opacity-5"></div>
                   <CardHeader className="pb-2 space-y-0 relative">
                     <CardTitle className="text-sm font-medium text-white/70">Pending Loans</CardTitle>
-                  </CardHeader>
+                </CardHeader>
                   <CardContent className="relative">
                     <div className="text-2xl font-bold text-white group-hover:text-yellow-400 transition-colors">{stats.pendingLoans}</div>
                     <div className="flex items-center mt-1">
                       <Badge className="bg-yellow-500/20 text-yellow-400 text-sm border border-yellow-500/20">+15.2%</Badge>
                       <span className="text-xs text-white/50 ml-2">vs last month</span>
                     </div>
-                  </CardContent>
-                </Card>
+                </CardContent>
+              </Card>
 
                 <Card className="bg-red-500/10 backdrop-blur-xl border-[0.5px] border-red-500/20 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] relative overflow-hidden group hover:scale-[1.02] transition-all duration-300 w-[300px]">
                   <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 via-transparent to-transparent"></div>
@@ -968,7 +1024,7 @@ export default function AdminDashboardPage() {
                     <div className="flex items-center mt-1">
                       <Badge className="bg-red-500/20 text-red-400 text-sm border border-red-500/20">+8.4%</Badge>
                       <span className="text-xs text-white/50 ml-2">vs last month</span>
-                    </div>
+            </div>
                   </CardContent>
                 </Card>
 
@@ -1215,7 +1271,7 @@ export default function AdminDashboardPage() {
                                   onClick={() => handleViewDocument(loan.bank_statement_url, 'Bank Statement', loan)}
                                 >
                                   Bank Statement
-                                </Button>
+            </Button>
                               )}
                               {loan.id_document_url && (
                                 <Button
@@ -1320,9 +1376,9 @@ export default function AdminDashboardPage() {
                       Next
                     </Button>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+          </div>
+        </CardContent>
+      </Card>
 
             {/* Business Predictions */}
             <Card className="bg-[#1B1B2C]/40 backdrop-blur-xl border-[0.5px] border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] relative overflow-hidden mb-6">
@@ -1818,10 +1874,28 @@ export default function AdminDashboardPage() {
           </main>
         </div>
       </div>
-      <UserManagementModal 
+
+      {/* Modals */}
+      <UserManagementModal
         isOpen={isUserManagementOpen}
         onClose={() => setIsUserManagementOpen(false)}
+        users={userAccounts}
+        onUserFilterChange={setUserFilter}
+        onSearchChange={setSearchUser}
+        onDisableUser={handleDisableUser}
       />
+      <StokvelaGroupsModal
+        isOpen={isStokvelaGroupsOpen}
+        onClose={() => setIsStokvelaGroupsOpen(false)}
+        groups={stokvelaGroups}
+        users={userAccounts}
+        members={stokvelaMembers}
+      />
+      <InvestmentsModal
+        isOpen={isInvestmentsOpen}
+        onClose={() => setIsInvestmentsOpen(false)}
+      />
+
       <Dialog open={showConfirmationDialog} onOpenChange={setShowConfirmationDialog}>
         <DialogContent className="bg-[#1B1B2C] border-white/10">
           <DialogHeader>

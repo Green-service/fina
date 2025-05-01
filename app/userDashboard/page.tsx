@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { DollarSign, Users, BarChart2, TrendingUp, Plus, FileText, Clock, ArrowRight, Bell, UserCircle, Settings, LogOut, User, Upload, Building2, CreditCard, Calendar, Phone, Mail, Home, X, Eye, Maximize2, CheckCircle, Key } from "lucide-react"
+import { DollarSign, Users, BarChart2, TrendingUp, Plus, FileText, Clock, ArrowRight, Bell, UserCircle, Settings, LogOut, User, Upload, Building2, CreditCard, Calendar, Phone, Mail, Home, X, Eye, Maximize2, CheckCircle, Key, ChevronLeft, ChevronRight, Wallet, ArrowUpDown, LayoutDashboard, Pencil, Trash2 } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import styles from './styles.module.css'
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/contexts/auth-context"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Textarea } from "@/components/ui/textarea"
@@ -36,6 +36,7 @@ import { Loader2, Check } from "lucide-react"
 import { authState } from '@/lib/auth-state'
 import emailjs from '@emailjs/browser'
 import LoanHistoryLimits from '@/components/LoanHistoryLimits'
+import { StokvelaGroupsModal } from "@/components/admin/StokvelaGroupsModal"
 
 interface UserProfile {
   id: string
@@ -58,6 +59,7 @@ interface UserProfile {
   last_login: string | null
   created_at: string
   updated_at: string
+  stokvela_admin?: number
 }
 
 interface FormData {
@@ -123,6 +125,32 @@ interface StokvelaJoinForm {
   terms_accepted: boolean;
 }
 
+interface Loan {
+  id: string;
+  loan_purpose: string;
+  status: string;
+  amount: string;
+  created_at: string;
+}
+
+interface Investment {
+  id: string;
+  investment_type: string;
+  status: string;
+  amount: number;
+  created_at: string;
+}
+
+interface Stokvela {
+  id: string;
+  name: string;
+  created_by: string;
+  joined_at: string;
+  stokvels: string;
+  verified: boolean;
+  amount_contibuted: number;
+}
+
 export default function UserDashboard() {
   const { user, userRole, isLoading: authLoading} = useAuth()
   const router = useRouter()
@@ -156,7 +184,7 @@ export default function UserDashboard() {
   const [isInvestmentSubmitting, setIsInvestmentSubmitting] = useState(false)
   const [userStokvelas, setUserStokvelas] = useState<any[]>([])
   const [isLoadingStokvelas, setIsLoadingStokvelas] = useState(false)
-  const [showAllStokvelas, setShowAllStokvelas] = useState(false)
+  const [showAllStokvelas, setShowAllStokvelas] = useState(true) // Set to true by default
   const [selectedStokvela, setSelectedStokvela] = useState<any>(null)
   const [isStokvelaDetailsOpen, setIsStokvelaDetailsOpen] = useState(false)
   const [stokvelaMembers, setStokvelaMembers] = useState<any[]>([])
@@ -238,6 +266,40 @@ export default function UserDashboard() {
     interestRate: 0
   })
 
+  const [tempProfileData, setTempProfileData] = useState<Partial<UserProfile>>({});
+
+  const { toast } = useToast()
+
+  const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [isStokvelaGroupsModalOpen, setIsStokvelaGroupsModalOpen] = useState(false)
+
+  const [isEditStokvelaModalOpen, setIsEditStokvelaModalOpen] = useState(false)
+  const [selectedStokvelaForEdit, setSelectedStokvelaForEdit] = useState<any>(null)
+  const [isDeleteStokvelaModalOpen, setIsDeleteStokvelaModalOpen] = useState(false)
+  const [selectedStokvelaForDelete, setSelectedStokvelaForDelete] = useState<any>(null)
+  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false)
+  const [selectedStokvelaForAddMember, setSelectedStokvelaForAddMember] = useState<any>(null)
+
+  // Ensure sidebar stays closed on mount and clear cookie
+  useEffect(() => {
+    const clearSidebarState = () => {
+      setIsSidebarOpen(false);
+      // Clear any stored state
+      document.cookie = "sidebar:state=false; path=/; max-age=0";
+      document.cookie = "sidebar-state=false; path=/; max-age=0";
+    };
+    
+    clearSidebarState();
+    // Run again after a short delay to ensure it takes effect
+    const timer = setTimeout(clearSidebarState, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Initialize Supabase client
   useEffect(() => {
     if (!supabaseRef.current) {
@@ -262,64 +324,69 @@ export default function UserDashboard() {
   // Define handleViewStokvelaDetails at the top of the component
   const handleViewStokvelaDetails = async (stokvela: any) => {
     try {
-      setIsLoadingMembers(true);
-      const { data: { session } } = await supabaseRef.current.auth.getSession();
-      if (!session?.user) return;
-
-      // Get all members of this stokvela group
+      setIsLoadingMembers(true)
       const { data: members, error } = await supabaseRef.current
         .from('stokvela_members')
         .select('*')
         .eq('group_id', stokvela.id)
-        .order('position', { ascending: true });
+        .order('position', { ascending: true })
 
-      if (error) throw error;
+      if (error) throw error
       
-      setSelectedStokvela(stokvela);
-      setStokvelaMembers(members || []);
-      setIsStokvelaDetailsOpen(true);
+      setSelectedStokvela(stokvela)
+      setStokvelaMembers(members || [])
+      setIsStokvelaDetailsOpen(true)
     } catch (error) {
-      console.error('Error fetching stokvela members:', error);
+      console.error('Error fetching stokvela members:', error)
       toast({
         title: "Error",
-        description: "Failed to fetch stokvela members. Please try again.",
+        description: "Failed to fetch stokvela members",
         variant: "destructive",
-      });
+      })
     } finally {
-      setIsLoadingMembers(false);
+      setIsLoadingMembers(false)
     }
-  };
+  }
 
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
-        const authUser = authState.getUser()
-        if (!authUser?.email) {
-          console.error('No user email found')
-        return
-      }
+        const userId = authState.getUserId()
+        if (!userId) return
 
         const { data, error } = await supabaseRef.current
           .from('users_account')
         .select('*')
-          .eq('email', authUser.email)
+          .eq('auth_id', userId)
         .single()
 
-        if (error) {
-          console.error('Error fetching user profile:', error)
-        return
-      }
+        if (error) throw error
 
         if (data) {
+          console.log('User Profile Data:', data) // Debug log
           setUserProfile({
             id: data.id,
+            auth_id: data.auth_id,
             email: data.email,
             full_name: data.full_name || '',
             phone: data.phone || '',
+            profile_picture_url: data.profile_picture_url,
+            user_role: data.user_role || 'user',
+            date_of_birth: data.date_of_birth,
             address: data.address || '',
+            city: data.city || '',
+            state: data.state,
+            postal_code: data.postal_code,
+            country: data.country || '',
             employment_status: data.employment_status || '',
             monthly_income: data.monthly_income || 0,
-            user_role: data.user_role || 'user'
+            credit_score: data.credit_score,
+            is_verified: data.is_verified,
+            last_login: data.last_login,
+            created_at: data.created_at,
+            updated_at: data.updated_at,
+            seen: data.seen,
+            stokvela_admin: data.stokela_admin
           })
         }
       } catch (error) {
@@ -396,11 +463,12 @@ export default function UserDashboard() {
 
   useEffect(() => {
     const fetchStokvelas = async () => {
-      if (activeTab === 'stokvela') {
         setIsLoadingStokvelas(true)
         try {
-          const userId = authState.getUserId();
-          if (!userId) return;
+        const userId = authState.getUserId()
+        console.log('Current User ID:', userId) // Debug log
+
+        if (!userId) return
 
           const { data: stokvelas, error } = await supabaseRef.current
             .from('stokvela_groups')
@@ -408,10 +476,18 @@ export default function UserDashboard() {
             .order('created_at', { ascending: false })
 
           if (error) throw error
+        
+        console.log('Stokvelas Raw Data:', stokvelas) // Debug log
           
           // Fetch member count and check user membership for each stokvela
           const stokvelasWithDetails = await Promise.all(
             (stokvelas || []).map(async (stokvela) => {
+            console.log('Processing Stokvela:', {
+              id: stokvela.id,
+              created_by: stokvela.created_by,
+              name: stokvela.name
+            }) // Debug log
+            
               // Get member count
               const { count, error: countError } = await supabaseRef.current
                 .from('stokvela_members')
@@ -443,6 +519,7 @@ export default function UserDashboard() {
             })
           )
           
+        console.log('Processed Stokvelas:', stokvelasWithDetails) // Debug log
           setUserStokvelas(stokvelasWithDetails || [])
         } catch (error) {
           console.error('Error fetching stokvelas:', error)
@@ -453,12 +530,11 @@ export default function UserDashboard() {
           })
         } finally {
           setIsLoadingStokvelas(false)
-        }
       }
     }
 
     fetchStokvelas()
-  }, [activeTab])
+  }, []) // Remove activeTab dependency
 
   useEffect(() => {
     const fetchRecentActivities = async () => {
@@ -492,7 +568,7 @@ export default function UserDashboard() {
 
         // Combine and format activities
         const activities: Activity[] = [
-          ...(loans || []).map(loan => ({
+          ...(loans || []).map((loan: Loan) => ({
             id: loan.id,
             type: 'loan',
             title: loan.loan_purpose || 'Loan Application',
@@ -501,7 +577,7 @@ export default function UserDashboard() {
             timestamp: loan.created_at,
             description: `Loan for ${loan.loan_purpose}`
           })),
-          ...(investments || []).map(inv => ({
+          ...(investments || []).map((inv: Investment) => ({
             id: inv.id,
             type: 'investment',
             title: inv.investment_type === 'j' ? 'Joint Investment' : 'Individual Investment',
@@ -510,7 +586,7 @@ export default function UserDashboard() {
             timestamp: inv.created_at,
             description: `${inv.investment_type === 'j' ? 'Joint' : 'Individual'} investment`
           })),
-          ...(stokvelas || []).map(stok => ({
+          ...(stokvelas || []).map((stok: Stokvela) => ({
             id: stok.id,
             type: 'stokvela',
             title: stok.stokvels?.name || 'Stokvela Group',
@@ -887,29 +963,35 @@ export default function UserDashboard() {
   }
 
   const handleUpdateProfile = async (updatedData: Partial<UserProfile>) => {
-    if (!userProfile?.id) return
+    setTempProfileData(prev => ({ ...prev, ...updatedData }));
+  };
 
-    const { error } = await supabaseRef.current
-      .from('profiles')
-      .update(updatedData)
-      .eq('id', userProfile.id)
+  const handleSaveProfile = async () => {
+    setIsSaving(true);
+    try {
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from('user_profiles')
+        .update(userProfile)
+        .eq('id', userProfile?.id);
 
-    if (error) {
-      console.error('Error updating profile:', error)
-      return
+      if (error) throw error;
+      setIsProfileModalOpen(false);
+      toast({
+        title: "Profile updated",
+        description: "Your profile has been updated successfully.",
+      });
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update profile. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
     }
-
-    // Refresh profile data
-    const { data: profileData } = await supabaseRef.current
-      .from('profiles')
-      .select('*')
-      .eq('id', userProfile.id)
-      .single()
-
-    if (profileData) {
-      setUserProfile(profileData)
-    }
-  }
+  };
 
   const handleChangePassword = async () => {
     try {
@@ -2137,52 +2219,293 @@ export default function UserDashboard() {
     console.log('EmailJS initialized');
   }, []);
 
+  // Add this function to handle opening the Stokvela Groups modal
+  const handleOpenStokvelaGroups = async () => {
+    await fetchStokvelaMembers()
+    setIsStokvelaGroupsModalOpen(true)
+  }
+
+  const sidebarButtons = [
+    {
+      label: "Overview",
+      icon: <LayoutDashboard className="h-5 w-5" />,
+      onClick: () => setActiveTab("overview"),
+      active: activeTab === "overview"
+    },
+    {
+      label: "Stokvela Groups",
+      icon: <Users className="h-5 w-5" />,
+      onClick: handleOpenStokvelaGroups,
+      active: activeTab === "stokvela"
+    },
+    {
+      label: "Investments",
+      icon: <TrendingUp className="h-5 w-5" />,
+      onClick: () => setActiveTab("investments"),
+      active: activeTab === "investments"
+    },
+    {
+      label: "Loans",
+      icon: <Wallet className="h-5 w-5" />,
+      onClick: () => setActiveTab("loans"),
+      active: activeTab === "loans"
+    }
+  ]
+
+  // Add this function to fetch stokvela members when needed
+  const fetchStokvelaMembers = async () => {
+    try {
+      setIsLoadingMembers(true)
+      const { data: members, error: membersError } = await supabaseRef.current
+        .from('stokvela_members')
+        .select('*')
+        .order('position', { ascending: true })
+
+      if (membersError) throw membersError
+      setStokvelaMembers(members || [])
+    } catch (error) {
+      console.error('Error fetching stokvela members:', error)
+      toast({
+        title: "Error",
+        description: "Failed to fetch stokvela members",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingMembers(false)
+    }
+  }
+
+  const handleEditStokvela = async (stokvela: any) => {
+    setSelectedStokvelaForEdit(stokvela)
+    setIsEditStokvelaModalOpen(true)
+  }
+
+  const handleDeleteStokvela = async (stokvela: any) => {
+    setSelectedStokvelaForDelete(stokvela)
+    setIsDeleteStokvelaModalOpen(true)
+  }
+
+  const handleConfirmDeleteStokvela = async () => {
+    if (!selectedStokvelaForDelete) return
+
+    try {
+      const { error } = await supabaseRef.current
+        .from('stokvela_groups')
+        .delete()
+        .eq('id', selectedStokvelaForDelete.id)
+
+      if (error) throw error
+
+      toast({
+        title: "Success",
+        description: "Stokvela group deleted successfully",
+        variant: "default",
+      })
+
+      // Refresh stokvela list
+      const fetchStokvelas = async () => {
+        setIsLoadingStokvelas(true)
+        try {
+          const userId = authState.getUserId()
+          if (!userId) return
+
+          const { data: stokvelas, error } = await supabaseRef.current
+            .from('stokvela_groups')
+            .select('*')
+            .order('created_at', { ascending: false })
+
+          if (error) throw error
+          
+          const stokvelasWithDetails = await Promise.all(
+            (stokvelas || []).map(async (stokvela) => {
+              const { count, error: countError } = await supabaseRef.current
+                .from('stokvela_members')
+                .select('*', { count: 'exact', head: true })
+                .eq('group_id', stokvela.id)
+              
+              if (countError) {
+                console.error('Error fetching member count:', countError)
+                return { ...stokvela, member_count: 0, is_member: false }
+              }
+
+              const { data: membership, error: membershipError } = await supabaseRef.current
+                .from('stokvela_members')
+                .select('*')
+                .eq('group_id', stokvela.id)
+                .eq('user_id', userId)
+                .single()
+
+              if (membershipError && membershipError.code !== 'PGRST116') {
+                console.error('Error checking membership:', membershipError)
+              }
+              
+              return { 
+                ...stokvela, 
+                member_count: count || 0,
+                is_member: !!membership
+              }
+            })
+          )
+          
+          setUserStokvelas(stokvelasWithDetails || [])
+        } catch (error) {
+          console.error('Error fetching stokvelas:', error)
+          toast({
+            title: "Error",
+            description: "Failed to fetch stokvela groups",
+            variant: "destructive",
+          })
+        } finally {
+          setIsLoadingStokvelas(false)
+        }
+      }
+
+      fetchStokvelas()
+    } catch (error) {
+      console.error('Error deleting stokvela:', error)
+      toast({
+        title: "Error",
+        description: "Failed to delete stokvela group",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeleteStokvelaModalOpen(false)
+      setSelectedStokvelaForDelete(null)
+    }
+  }
+
+  const handleAddMember = async (stokvela: any) => {
+    setSelectedStokvelaForAddMember(stokvela)
+    setIsAddMemberModalOpen(true)
+  }
+
   return (
-    <div className={styles.dashboardContainer}>
-      <div className="p-4 border-b border-white/10 mt-16">
-        <div className="flex justify-between items-center">
-            <div>
-            <h1 className="text-xl font-semibold text-sky-400">Welcome back, {userProfile?.full_name || 'User'}!</h1>
-            <p className="text-sm text-sky-400/80">Here's an overview of your loan spaces.</p>
+    <div className="flex h-screen bg-[#111111] text-white">
+      {/* Backdrop */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+      {/* Sidebar */}
+      <div className={`fixed top-0 left-0 h-screen bg-[#111111] border-r border-white/10 transition-all duration-300 z-50 ${isSidebarOpen ? 'w-56' : 'w-14'}`}>
+        <div className="flex flex-col h-full">
+          {/* Toggle Button */}
+          <div className="flex items-center justify-between p-4 border-b border-white/10">
+            {isSidebarOpen ? (
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
+                <span className="text-sm font-medium">User Dashboard</span>
+              </div>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/5"
+            >
+              {isSidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
           </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-green-500 text-white">
-                    {getUserInitial(userProfile?.full_name)}
-                  </AvatarFallback>
-                </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
-              <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{userProfile?.full_name}</p>
-                  <p className="text-xs leading-none text-muted-foreground">
-                    {userProfile?.email}
-                  </p>
+
+          {/* Navigation Items */}
+          <div className="flex-1 p-2 space-y-1">
+            {isSidebarOpen && (
+              <div className="p-4 border-b border-white/10 mb-4">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <div className="flex items-center gap-4 cursor-pointer">
+                  <Avatar className="h-12 w-12 border border-white/10">
+                    <AvatarImage src={userProfile?.profile_picture_url || ''} alt={userProfile?.full_name || ''} />
+                    <AvatarFallback className="bg-gradient-to-r from-green-400 to-sky-400 text-white font-medium">
+                      {getUserInitial(userProfile?.full_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-medium">{userProfile?.full_name}</p>
+                    <p className="text-[10px] leading-none text-white/60 mt-1 truncate max-w-[120px]">{userProfile?.email}</p>
+                  </div>
+                </div>
+            </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-64 bg-[#111111]/95 backdrop-blur-sm border-white/10 shadow-lg" align="start" forceMount>
+              <DropdownMenuLabel className="p-4">
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-12 w-12 border border-white/10">
+                    <AvatarImage src={userProfile?.profile_picture_url || ''} alt={userProfile?.full_name || ''} />
+                    <AvatarFallback className="bg-gradient-to-r from-green-400 to-sky-400 text-white font-medium">
+                      {getUserInitial(userProfile?.full_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-medium">{userProfile?.full_name}</p>
+                    <p className="text-xs leading-none text-white/60 mt-1">{userProfile?.email}</p>
+                  </div>
                 </div>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setIsProfileModalOpen(true)}>
-                  <User className="mr-2 h-4 w-4" />
-                  <span>Update Profile</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)}>
-                <Key className="mr-2 h-4 w-4" />
-                  <span>Change Password</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                <span>Sign out</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <DropdownMenuSeparator className="bg-white/10" />
+              <DropdownMenuItem
+                onClick={() => setIsProfileModalOpen(true)}
+                className="text-white/90 hover:text-white hover:bg-white/5 cursor-pointer py-2.5"
+              >
+                <User className="mr-2 h-4 w-4" />
+                      <span>Update Profile</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setIsPasswordModalOpen(true)}
+                      className="text-white/90 hover:text-white hover:bg-white/5 cursor-pointer py-2.5"
+                    >
+                      <Key className="mr-2 h-4 w-4" />
+                      <span>Change Password</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleSignOut}
+                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer py-2.5"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Sign Out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+              </div>
+            )}
+            {sidebarButtons.map(button => (
+              <Button
+                key={button.label}
+                variant="ghost"
+                className={`w-full justify-start gap-2 text-white/60 hover:text-white hover:bg-white/5 ${isSidebarOpen ? 'px-4' : 'px-2'}`}
+                onClick={button.onClick}
+              >
+                {button.icon}
+                {isSidebarOpen && <span>{button.label}</span>}
+              </Button>
+            ))}
           </div>
         </div>
-      <div className="flex justify-center items-center space-x-4 mb-8">
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-auto ml-14">
+        {/* Top Nav Bar */}
+        <div className="fixed top-0 right-0 w-full bg-[#111111] border-b border-white/10 p-4">
+          <div className="max-w-7xl mx-auto flex justify-center">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
+            <span className="text-sm font-medium">Green Fina</span>
+          </div>
+                  </div>
+        </div>
+
+        {/* Main Content Area */}
+        <div className="p-4 border-b border-white/10 mt-16">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-xl font-semibold text-sky-400">Welcome back, {userProfile?.full_name || 'User'}!</h1>
+              <p className="text-sm text-sky-400/80">Here's an overview of your loan spaces.</p>
+            </div>
+          </div>
+        </div>
+      <div className="flex justify-center items-center mb-8">
           <button 
             onClick={() => setIsLoanModalOpen(true)}
           className="w-40 px-4 py-2 bg-gradient-to-r from-green-500 via-green-400 to-green-600 text-white rounded-lg shadow-[0_0_15px_rgba(34,197,94,0.3)] hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] transition-all duration-300 transform hover:scale-105 flex items-center justify-center space-x-2 group relative overflow-hidden"
@@ -2193,17 +2516,7 @@ export default function UserDashboard() {
           </svg>
           <span className="text-sm font-semibold relative z-10">Apply Loan</span>
           </button>
-          <button 
-            onClick={() => setIsInvestmentModalOpen(true)}
-          className="w-40 px-4 py-2 bg-gradient-to-r from-orange-500 via-orange-400 to-orange-600 text-white rounded-lg shadow-[0_0_15px_rgba(249,115,22,0.3)] hover:shadow-[0_0_25px_rgba(249,115,22,0.5)] transition-all duration-300 transform hover:scale-105 flex items-center justify-center space-x-2 group relative overflow-hidden"
-          >
-          <div className="absolute inset-0 bg-gradient-to-r from-orange-400/20 to-transparent animate-pulse"></div>
-          <svg className="w-4 h-4 transform group-hover:rotate-12 transition-transform duration-300 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-          </svg>
-          <span className="text-sm font-semibold relative z-10">Invest</span>
-          </button>
-        </div>
+      </div>
 
       {/* Main Content */}
       <div className={styles.mainContent}>
@@ -2500,6 +2813,7 @@ export default function UserDashboard() {
                                investment.investment_type === 'i' ? 'Individual Investment' : 
                                investment.investment_type === 'fixed' ? 'Fixed Term' : 
                                investment.investment_type === 'flexible' ? 'Flexible' : 
+                               investment.investment_type === 'flexible' ? 'Flexible' : 
                                investment.investment_type}
                             </p>
                             <p className="text-xs text-white/60">
@@ -2692,62 +3006,148 @@ export default function UserDashboard() {
 
       {/* Profile Edit Modal */}
       <Dialog open={isProfileModalOpen} onOpenChange={setIsProfileModalOpen}>
-        <DialogContent className="bg-[#111111] text-white border-white/10 max-w-sm">
-          <DialogHeader className="space-y-1">
-            <div className="flex items-center justify-between">
-            <DialogTitle className="text-base font-medium flex items-center gap-2">
-              <div className="h-4 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
-              Edit Profile
-            </DialogTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsProfileModalOpen(false)}
-                className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/5"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <DialogDescription className="text-white/60 text-xs">
-              Update your personal information
+        <DialogContent className="sm:max-w-[600px] bg-[#111111] border-white/10">
+          <DialogHeader>
+            <DialogTitle className="text-white">Profile Settings</DialogTitle>
+            <DialogDescription className="text-white/60">
+              Update your profile information and manage your account settings.
             </DialogDescription>
           </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto pr-4">
+            <div className="space-y-4 py-4">
+            <div className="flex items-center gap-4">
+              <Avatar className="h-20 w-20 border border-white/10">
+                <AvatarImage src={userProfile?.profile_picture_url || ''} alt={userProfile?.full_name || ''} />
+                <AvatarFallback className="bg-gradient-to-r from-green-400 to-sky-400 text-white font-medium text-xl">
+                  {getUserInitial(userProfile?.full_name)}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                  <p className="text-lg font-medium text-white">{userProfile?.full_name}</p>
+                <p className="text-sm text-white/60">{userProfile?.email}</p>
+              </div>
+            </div>
 
-          <div className="space-y-2 py-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Full Name</Label>
-              <Input
-                defaultValue={userProfile?.full_name || ''}
-                className="bg-white/5 border-0 text-sm h-8"
-                onChange={(e) => handleUpdateProfile({ full_name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Phone Number</Label>
-              <Input
-                defaultValue={userProfile?.phone || ''}
-                className="bg-white/5 border-0 text-sm h-8"
-                onChange={(e) => handleUpdateProfile({ phone: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Address</Label>
-              <Input
-                defaultValue={userProfile?.address || ''}
-                className="bg-white/5 border-0 text-sm h-8"
-                onChange={(e) => handleUpdateProfile({ address: e.target.value })}
-              />
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                  <Label htmlFor="fullName" className="text-white/90">Full Name</Label>
+                <Input
+                  id="fullName"
+                  value={userProfile?.full_name || ''}
+                  onChange={(e) => handleUpdateProfile({ full_name: e.target.value })}
+                    className="bg-[#1a1a1a] border-white/10 text-white"
+                />
+              </div>
+              <div className="grid gap-2">
+                  <Label htmlFor="email" className="text-white/90">Email</Label>
+                <Input
+                  id="email"
+                  value={userProfile?.email || ''}
+                  disabled
+                    className="bg-[#1a1a1a] border-white/10 text-white"
+                />
+              </div>
+              <div className="grid gap-2">
+                  <Label htmlFor="phone" className="text-white/90">Phone</Label>
+                <Input
+                  id="phone"
+                  value={userProfile?.phone || ''}
+                  onChange={(e) => handleUpdateProfile({ phone: e.target.value })}
+                    className="bg-[#1a1a1a] border-white/10 text-white"
+                />
+              </div>
+              <div className="grid gap-2">
+                  <Label htmlFor="address" className="text-white/90">Address</Label>
+                <Input
+                  id="address"
+                  value={userProfile?.address || ''}
+                  onChange={(e) => handleUpdateProfile({ address: e.target.value })}
+                    className="bg-[#1a1a1a] border-white/10 text-white"
+                />
+              </div>
+              <div className="grid gap-2">
+                  <Label htmlFor="employmentStatus" className="text-white/90">Employment Status</Label>
+                <Select
+                  value={userProfile?.employment_status || ''}
+                  onValueChange={(value) => handleUpdateProfile({ employment_status: value })}
+                >
+                    <SelectTrigger className="bg-[#1a1a1a] border-white/10 text-white">
+                    <SelectValue placeholder="Select employment status" />
+                  </SelectTrigger>
+                    <SelectContent className="bg-[#1a1a1a] border-white/10">
+                    <SelectItem value="employed">Employed</SelectItem>
+                    <SelectItem value="self-employed">Self-employed</SelectItem>
+                    <SelectItem value="unemployed">Unemployed</SelectItem>
+                    <SelectItem value="student">Student</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                  <Label htmlFor="monthlyIncome" className="text-white/90">Monthly Income</Label>
+                <Input
+                  id="monthlyIncome"
+                  type="number"
+                  value={userProfile?.monthly_income || ''}
+                    onChange={(e) => handleUpdateProfile({ monthly_income: parseFloat(e.target.value) })}
+                    className="bg-[#1a1a1a] border-white/10 text-white"
+                />
+              </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="userRole" className="text-white/90">User Role</Label>
+                  <Select
+                    value={userProfile?.user_role === '1' ? 'user' : 'admin'}
+                    onValueChange={(value) => handleUpdateProfile({ user_role: value === 'user' ? '1' : '2' })}
+                  >
+                    <SelectTrigger className="bg-[#1a1a1a] border-white/10 text-white">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1a1a] border-white/10">
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="stokvelaAdmin" className="text-white/90">Stokvela Admin</Label>
+                  <Select
+                    value={userProfile?.stokvela_admin === 1 ? 'yes' : 'no'}
+                    onValueChange={(value) => handleUpdateProfile({ stokvela_admin: value === 'yes' ? 1 : 0 })}
+                  >
+                    <SelectTrigger className="bg-[#1a1a1a] border-white/10 text-white">
+                      <SelectValue placeholder="Select stokvela admin status" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1a1a] border-white/10">
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
           </div>
-
-          <div className="flex justify-end mt-2">
+          <DialogFooter>
             <Button
+              variant="outline"
               onClick={() => setIsProfileModalOpen(false)}
-              className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 h-8 text-xs"
+              className="bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 hover:text-red-300"
             >
-              Save Changes
-                  </Button>
-          </div>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveProfile}
+              disabled={isSaving}
+              className="bg-gradient-to-r from-green-400 to-sky-400 text-white hover:from-green-500 hover:to-sky-500"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -3056,12 +3456,11 @@ export default function UserDashboard() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Employment Contract</Label>
+                <Label>Employment Contract (Optional)</Label>
                 <Input
                   type="file"
                   accept=".pdf"
                   onChange={(e) => setFormData({ ...formData, employmentContract: e.target.files?.[0] || null })}
-                  required
                   className="bg-white/5 border-white/10 text-white"
                 />
               </div>
@@ -3494,18 +3893,56 @@ export default function UserDashboard() {
                           </div>
                         </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                        {stokvela.is_member && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => stokvela.is_member ? handleViewStokvelaDetails(stokvela) : handleJoinStokvela(stokvela)}
-                        className={`${
-                          stokvela.is_member 
-                            ? "bg-white/50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-800/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/50"
-                            : "bg-green-500 hover:bg-green-600 text-white border-green-600"
-                        } transition-all duration-300`}
-                      >
-                        {stokvela.is_member ? "View Members" : "Join Stokvela"}
+                            onClick={() => handleViewStokvelaDetails(stokvela)}
+                            className="bg-white/50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-800/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/50 transition-all duration-300"
+                          >
+                            View Members
                       </Button>
+                        )}
+                        {!stokvela.is_member && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleJoinStokvela(stokvela)}
+                            className="bg-green-500 hover:bg-green-600 text-white border-green-600 transition-all duration-300"
+                          >
+                            Join Stokvela
+                          </Button>
+                        )}
+                        {/* Debug output */}
+                        {console.log('Render check:', {
+                          userProfileId: userProfile?.id,
+                          stokvelaCreatedBy: stokvela.created_by,
+                          shouldShow: userProfile?.id === stokvela.created_by
+                        })}
+                        {userProfile?.id === stokvela.created_by && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditStokvela(stokvela)}
+                              className="bg-yellow-500 hover:bg-yellow-600 text-white border-yellow-600 transition-all duration-300"
+                              title="Edit Stokvela"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteStokvela(stokvela)}
+                              className="bg-red-500 hover:bg-red-600 text-white border-red-600 transition-all duration-300"
+                              title="Delete Stokvela"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -4226,6 +4663,92 @@ export default function UserDashboard() {
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+        {/* Success Dialog */}
+        <Dialog open={isSuccessDialogOpen} onOpenChange={setIsSuccessDialogOpen}>
+          <DialogContent className="bg-[#111111] text-white border-white/10 max-w-sm">
+            <DialogHeader className="space-y-1">
+              <div className="flex items-center justify-between">
+                <DialogTitle className="text-base font-medium flex items-center gap-2">
+                  <div className="h-4 w-1 bg-gradient-to-b from-green-400 to-sky-400"></div>
+                  Success
+                </DialogTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSuccessDialogOpen(false)}
+                  className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/5 rounded-full"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </DialogHeader>
+            <div className="flex flex-col items-center justify-center py-4">
+              <div className="h-12 w-12 rounded-full bg-green-500/20 flex items-center justify-center mb-4">
+                <Check className="h-6 w-6 text-green-400" />
+              </div>
+              <p className="text-sm text-white/90 text-center">
+                Your profile has been successfully updated!
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                onClick={() => setIsSuccessDialogOpen(false)}
+                className="bg-gradient-to-r from-green-400 to-sky-400 hover:from-green-500 hover:to-sky-500 h-8 text-xs"
+              >
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      
+      {/* Add the StokvelaGroupsModal */}
+      <StokvelaGroupsModal
+        isOpen={isStokvelaGroupsModalOpen}
+        onClose={() => setIsStokvelaGroupsModalOpen(false)}
+        groups={userStokvelas}
+        members={stokvelaMembers}
+        isAdminView={false}
+      />
+
+      {/* Edit Stokvela Modal */}
+      <Dialog open={isEditStokvelaModalOpen} onOpenChange={setIsEditStokvelaModalOpen}>
+        <DialogContent className="max-w-md bg-gradient-to-br from-gray-900 to-gray-800 text-white border border-gray-700">
+          <DialogTitle className="text-2xl font-bold text-white mb-4">Edit Stokvela</DialogTitle>
+          {/* Add edit form here */}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDeleteStokvelaModalOpen} onOpenChange={setIsDeleteStokvelaModalOpen}>
+        <DialogContent className="max-w-md bg-gradient-to-br from-gray-900 to-gray-800 text-white border border-gray-700">
+          <DialogTitle className="text-2xl font-bold text-white mb-4">Delete Stokvela</DialogTitle>
+          <p className="text-white/80 mb-4">Are you sure you want to delete this stokvela group? This action cannot be undone.</p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteStokvelaModalOpen(false)}
+              className="text-white border-white/20 hover:bg-white/10"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDeleteStokvela}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddMemberModalOpen} onOpenChange={setIsAddMemberModalOpen}>
+        <DialogContent className="max-w-md bg-gradient-to-br from-gray-900 to-gray-800 text-white border border-gray-700">
+          <DialogTitle className="text-2xl font-bold text-white mb-4">Add Member</DialogTitle>
+          {/* Add member form here */}
         </DialogContent>
       </Dialog>
     </div>

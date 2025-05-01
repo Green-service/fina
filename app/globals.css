@@ -562,3 +562,24 @@ html {
     animation: pulse 2s infinite;
   }
 }
+
+/* Force sidebar closed */
+.force-sidebar-closed {
+  --sidebar-width: 4rem !important;
+}
+
+.force-sidebar-closed [data-sidebar="sidebar"] {
+  width: 4rem !important;
+}
+
+/* Override any sidebar transitions */
+[data-sidebar="sidebar"] {
+  width: 4rem !important;
+  transition: none !important;
+}
+
+/* Ensure sidebar content is properly hidden */
+[data-sidebar="sidebar"] > *:not(.sidebar-toggle) {
+  opacity: 0;
+  visibility: hidden;
+}

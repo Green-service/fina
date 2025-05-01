@@ -1,4 +1,5 @@
 import { DashboardNavbar } from "@/components/dashboard/navbar"
+import { ForceSidebarClosed } from "@/components/dashboard/force-sidebar-closed"
 
 export default function UserDashboardLayout({
   children,
@@ -7,8 +8,9 @@ export default function UserDashboardLayout({
 }) {
   return (
     <>
+      <ForceSidebarClosed />
       <DashboardNavbar />
-      <main className="min-h-screen pt-20">
+      <main className="min-h-screen pt-16">
         {children}
       </main>
     </>

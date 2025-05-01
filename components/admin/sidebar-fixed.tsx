@@ -21,9 +21,11 @@ import { Button } from "@/components/ui/button"
 interface SidebarProps {
   onSignOut: () => void
   onUserManagementClick?: () => void
+  onStokvelaGroupsClick?: () => void
+  onInvestmentsClick?: () => void
 }
 
-export function AdminSidebar({ onSignOut, onUserManagementClick }: SidebarProps) {
+export function AdminSidebar({ onSignOut, onUserManagementClick, onStokvelaGroupsClick, onInvestmentsClick }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(true)
   const pathname = usePathname()
 
@@ -46,13 +48,15 @@ export function AdminSidebar({ onSignOut, onUserManagementClick }: SidebarProps)
     },
     {
       name: "Stokvela Groups",
-      href: "/adminDashboard/stokvela",
+      href: "#",
       icon: UserGroupIcon,
+      onClick: onStokvelaGroupsClick,
     },
     {
       name: "Investments",
-      href: "/adminDashboard/investments",
+      href: "#",
       icon: BanknotesIcon,
+      onClick: onInvestmentsClick,
     },
     {
       name: "Analytics",
